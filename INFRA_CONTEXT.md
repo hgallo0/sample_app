@@ -54,6 +54,19 @@ the assigned IP's range.
 | Cloud Run ingress | `INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER` — `*.run.app` URL is not directly reachable; `allUsers` invoker binding is paired with this restriction (network-layer gate, not IAM) |
 | Cloud Run service (current) | `game-api`, placeholder image `us-docker.pkg.dev/cloudrun/container/hello`, min=0/max=1, runs as the default compute service account (`923334354359-compute@developer.gserviceaccount.com`) — **swap the image for the real build during the live session, same service name, LB stays untouched** |
 
+## game-engine (Go, internal only)
+
+`game-api` (Python) and `game-engine` (Go) are two separate Cloud Run services, not one monolith — a deliberate polyglot split, kept on Cloud Run rather than GKE since GKE would need real provisioning time and would force reworking the LB's serverless-NEG backend, for no functional gain over two independently deployable Cloud Run services.
+
+| Field | Value |
+|---|---|
+| Service | `game-engine`, Cloud Run, `us-central1` |
+| Ingress | `INGRESS_TRAFFIC_INTERNAL_ONLY` — no LB, no public internet path at all |
+| Invoker | restricted to `923334354359-compute@developer.gserviceaccount.com` (the same default compute SA `game-api` runs as) — not `allUsers` |
+| URL | `tofu output game_engine_url` (internal-only, only resolvable/callable from other Cloud Run/serverless resources in this project) |
+| Current image | placeholder `us-docker.pkg.dev/cloudrun/container/hello`, min=0/max=1 — swap for the real Go build during the live session |
+| Who calls it | only `game-api` — attach an ID token for the same default compute SA when calling (authenticated Cloud Run-to-Cloud Run invocation, since invoker isn't public) |
+
 ## DNS
 
 `cloudwithgallo.com` is registered at GoDaddy. Only the `rps` subdomain is
@@ -93,10 +106,11 @@ Per `CLAUDE.md`: no secret values live in Terraform/OpenTofu state, ever.
 
 ## What's still a placeholder / deferred to the live build
 
-Per `PLAN.md`'s prep-scope rule — infra above is real and applied; app-layer
-work is intentionally left for the live session:
-- FastAPI backend (`db.py`/`models.py`/`auth.py`/`cache.py`/`game.py`)
-- Dockerfile
+Infra above is real and applied; app-layer work is intentionally left for
+the live session:
+- `game-api` (Python/FastAPI): `db.py`/`models.py`/`auth.py`/`cache.py`, plus the client call into `game-engine` for move resolution
+- `game-engine` (Go): the actual RPS move-comparison logic, served internally to `game-api` only
+- Dockerfiles for both services
 - Frontend (React + Firebase Google Sign-In)
 - Apigee proxy bundle wiring Apigee → `game-api` (incl. fixing the envgroup hostname above)
-- Swapping the placeholder Cloud Run image for the real build
+- Swapping both placeholder Cloud Run images for the real builds
