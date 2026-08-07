@@ -297,8 +297,8 @@ resource "google_compute_security_policy" "waf" {
   }
 
   rule {
-    action      = "allow"
-    priority    = 2147483647
+    action   = "allow"
+    priority = 2147483647
     match {
       versioned_expr = "SRC_IPS_V1"
       config {
