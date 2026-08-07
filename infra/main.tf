@@ -4,10 +4,6 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 6.0"
     }
-    random = {
-      source  = "hashicorp/random"
-      version = "~> 3.6"
-    }
   }
 }
 
@@ -38,6 +34,16 @@ resource "google_project_service" "dns" {
   project            = var.project_id
   service            = "dns.googleapis.com"
   disable_on_destroy = false
+}
+
+resource "google_project_service" "secretmanager" {
+  project            = var.project_id
+  service            = "secretmanager.googleapis.com"
+  disable_on_destroy = false
+}
+
+data "google_project" "current" {
+  project_id = var.project_id
 }
 
 data "google_compute_network" "default" {
@@ -118,11 +124,6 @@ resource "google_apigee_envgroup_attachment" "eval_envgroup_attachment" {
   environment = google_apigee_environment.eval_env.name
 }
 
-resource "random_password" "db_password" {
-  length  = 24
-  special = false
-}
-
 # Smallest/cheapest tier, no HA, no backups - this is interview-prep infra,
 # not production. Tear down after the interview; it bills hourly whether
 # idle or not.
@@ -156,10 +157,39 @@ resource "google_sql_database" "rps" {
   instance = google_sql_database_instance.postgres.name
 }
 
+# Password is set out-of-band (gcloud/console), never through Terraform -
+# best practice per CLAUDE.md: passwords should never live in state, since
+# anyone with state read access can see them in plaintext.
 resource "google_sql_user" "rps_app" {
   name     = "rps_app"
   instance = google_sql_database_instance.postgres.name
-  password = random_password.db_password.result
+
+  lifecycle {
+    ignore_changes = [password]
+  }
+}
+
+# Container only - no google_secret_manager_secret_version here. The actual
+# password value is added out-of-band (gcloud) so it never enters Tofu state,
+# same reasoning as the sql_user password above. game-api's runtime service
+# account reads it directly from Secret Manager instead of it being handed
+# to/asked from Henry.
+resource "google_secret_manager_secret" "db_password" {
+  project   = var.project_id
+  secret_id = "rps-db-password"
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.secretmanager]
+}
+
+resource "google_secret_manager_secret_iam_member" "db_password_accessor" {
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.db_password.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${data.google_project.current.number}-compute@developer.gserviceaccount.com"
 }
 
 # BASIC tier (no HA replica), 1GB - cheapest option, same reasoning as above.
