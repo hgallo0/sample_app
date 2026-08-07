@@ -10,6 +10,7 @@ Mock build for the Savvy Senior Engineer AI/technical exercise interview round.
   - `output.tf` — outputs
 - Reusable/repeated infra goes in `infra/modules/<module-name>/`, each module following the same `main.tf` / `vars.tf` / `output.tf` split internally.
 - Use OpenTofu (`tofu`), not Terraform CLI.
+- Do not create GCP resources imperatively with `gcloud` (or the console). Everything provisioned - including things that feel "fast enough to just create ad-hoc," like an Artifact Registry repo - must be defined in OpenTofu and created via `tofu apply`. `gcloud` is only for read-only checks (`describe`/`list`/`get-iam-policy`) and for the specific out-of-band secret-value operations called out below, never for creating/modifying infrastructure.
 
 ## Security conventions
 
