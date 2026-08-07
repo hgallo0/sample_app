@@ -15,3 +15,9 @@ variable "apigee_analytics_region" {
   type        = string
   default     = "us-central1"
 }
+
+variable "lb_domain" {
+  description = "Public hostname for the external HTTPS load balancer (managed cert is issued for this domain)"
+  type        = string
+  default     = "rps.cloudwithgallo.com"
+}
