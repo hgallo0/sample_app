@@ -392,6 +392,16 @@ resource "google_compute_security_policy" "waf" {
   project = var.project_id
   name    = "rps-waf"
 
+  # Without this, Cloud Armor inspects request bodies as opaque strings, so
+  # any JSON object/array's {}/[] structure trips the SQLi/XSS preconfigured
+  # rules as a false positive - every JSON POST body gets blocked outright.
+  # STANDARD parses Content-Type: application/json bodies properly and
+  # inspects field values individually instead, preserving real protection.
+  advanced_options_config {
+    json_parsing = "STANDARD"
+    log_level    = "VERBOSE"
+  }
+
   rule {
     action   = "deny(403)"
     priority = 1000
@@ -454,6 +464,12 @@ resource "google_compute_backend_service" "game_api" {
   protocol              = "HTTPS"
   load_balancing_scheme = "EXTERNAL_MANAGED"
   security_policy       = google_compute_security_policy.waf.id
+
+  # Was off entirely - the WAF false-positive on JSON bodies (see the
+  # security policy above) was undiagnosable without this.
+  log_config {
+    enable = true
+  }
 
   backend {
     group = google_compute_region_network_endpoint_group.game_api_neg.id
