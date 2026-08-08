@@ -37,8 +37,7 @@ the assigned IP's range.
 | Cloud SQL instance | `rps-postgres` (Postgres 16, `db-f1-micro`, edition `ENTERPRISE`, zonal, no HA/backups) |
 | Postgres private IP | `10.16.80.3` |
 | Postgres database | `rps` |
-| Postgres user | `rps_app` |
-| Postgres password | **not in Terraform state.** Held in Secret Manager, secret ID `rps-db-password` (`tofu output db_password_secret_id`). Fetch at runtime with `gcloud secrets versions access latest --secret=rps-db-password --project=backend-500517`, or via the Secret Manager client library from `game-api`'s runtime service account (already granted `roles/secretmanager.secretAccessor` on this secret). |
+| Postgres auth | **IAM DB auth, no password at all.** `cloudsql.iam_authentication` is on; the runtime service account (`tofu output db_iam_user`) is registered as a `CLOUD_IAM_SERVICE_ACCOUNT` SQL user with `roles/cloudsql.instanceUser` + `roles/cloudsql.client`. Connect via the Cloud SQL Python Connector (`enable_iam_auth=True`) or equivalent — never a static credential. |
 | Redis instance | `rps-leaderboard-cache` (`BASIC`, 1GB, `PRIVATE_SERVICE_ACCESS`, no AUTH — network-isolated only) |
 | Redis host | `10.120.115.11` (port 6379, default) |
 
@@ -53,6 +52,19 @@ the assigned IP's range.
 | WAF | Cloud Armor policy `rps-waf` — blocks XSS (`xss-stable`) + SQLi (`sqli-stable`) preconfigured rules, rate limit 100 req/60s per source IP (429 on exceed) |
 | Cloud Run ingress | `INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER` — `*.run.app` URL is not directly reachable; `allUsers` invoker binding is paired with this restriction (network-layer gate, not IAM) |
 | Cloud Run service (current) | `game-api`, placeholder image `us-docker.pkg.dev/cloudrun/container/hello`, min=0/max=1, runs as the default compute service account (`923334354359-compute@developer.gserviceaccount.com`) — **swap the image for the real build during the live session, same service name, LB stays untouched** |
+
+## game-engine (Go, internal only)
+
+`game-api` (Python) and `game-engine` (Go) are two separate Cloud Run services, not one monolith — a deliberate polyglot split, kept on Cloud Run rather than GKE since GKE would need real provisioning time and would force reworking the LB's serverless-NEG backend, for no functional gain over two independently deployable Cloud Run services.
+
+| Field | Value |
+|---|---|
+| Service | `game-engine`, Cloud Run, `us-central1` |
+| Ingress | `INGRESS_TRAFFIC_INTERNAL_ONLY` — no LB, no public internet path at all |
+| Invoker | restricted to `923334354359-compute@developer.gserviceaccount.com` (the same default compute SA `game-api` runs as) — not `allUsers` |
+| URL | `tofu output game_engine_url` (internal-only, only resolvable/callable from other Cloud Run/serverless resources in this project) |
+| Current image | placeholder `us-docker.pkg.dev/cloudrun/container/hello`, min=0/max=1 — swap for the real Go build during the live session |
+| Who calls it | only `game-api` — attach an ID token for the same default compute SA when calling (authenticated Cloud Run-to-Cloud Run invocation, since invoker isn't public) |
 
 ## DNS
 
@@ -79,24 +91,22 @@ untouched):
 ## Secrets policy
 
 Per `CLAUDE.md`: no secret values live in Terraform/OpenTofu state, ever.
-- `google_sql_user.rps_app` has no `password` in config and
-  `lifecycle { ignore_changes = [password] }` — the value is set manually
-  via `gcloud sql users set-password`.
-- The same value is also stored in Secret Manager (`rps-db-password`) via a
-  `google_secret_manager_secret` container + IAM binding managed in Tofu —
-  but the secret *version* (the actual value) was added out-of-band via
-  `gcloud secrets versions add`, never through a
-  `google_secret_manager_secret_version` resource, so it never touches state.
-- If the live build needs the DB password, resolve it through Secret
-  Manager (see table above) — don't ask Henry, and don't look in
-  `terraform.tfstate` or `tofu output`.
+The DB layer goes further than "don't store the password carefully" —
+there is no password at all. IAM DB auth means the runtime service account
+authenticates as itself with a short-lived token; there's nothing to fetch,
+rotate, or leak. If any future secret is genuinely needed, follow the same
+pattern already established for the (now-removed) DB password: manage only
+the Secret Manager container + IAM binding in Tofu, add the actual value
+out-of-band via `gcloud secrets versions add`, never a
+`google_secret_manager_secret_version` resource with the value inline.
 
 ## What's still a placeholder / deferred to the live build
 
-Per `PLAN.md`'s prep-scope rule — infra above is real and applied; app-layer
-work is intentionally left for the live session:
-- FastAPI backend (`db.py`/`models.py`/`auth.py`/`cache.py`/`game.py`)
-- Dockerfile
+Infra above is real and applied; app-layer work is intentionally left for
+the live session:
+- `game-api` (Python/FastAPI): `db.py`/`models.py`/`auth.py`/`cache.py`, plus the client call into `game-engine` for move resolution
+- `game-engine` (Go): the actual RPS move-comparison logic, served internally to `game-api` only
+- Dockerfiles for both services
 - Frontend (React + Firebase Google Sign-In)
 - Apigee proxy bundle wiring Apigee → `game-api` (incl. fixing the envgroup hostname above)
-- Swapping the placeholder Cloud Run image for the real build
+- Swapping both placeholder Cloud Run images for the real builds
