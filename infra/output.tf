@@ -45,3 +45,13 @@ output "db_iam_user" {
   description = "Postgres IAM database username game-api connects as (service account email, .gserviceaccount.com suffix stripped per Cloud SQL IAM auth convention)"
   value       = "${data.google_project.current.number}-compute@developer"
 }
+
+output "firebase_web_app_config" {
+  description = "Firebase JS SDK config - apiKey/authDomain/projectId are not secrets, safe to embed client-side. Google sign-in still needs to be enabled manually in the Firebase Console before this is usable."
+  value = {
+    api_key     = data.google_firebase_web_app_config.rps.api_key
+    auth_domain = data.google_firebase_web_app_config.rps.auth_domain
+    project_id  = var.project_id
+    app_id      = google_firebase_web_app.rps.app_id
+  }
+}

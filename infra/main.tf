@@ -4,12 +4,26 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 6.0"
     }
+    google-beta = {
+      source  = "hashicorp/google-beta"
+      version = "~> 6.0"
+    }
   }
 }
 
 provider "google" {
-  project = var.project_id
-  region  = var.region
+  project               = var.project_id
+  region                = var.region
+  user_project_override = true
+  billing_project       = var.project_id
+}
+
+# google_firebase_web_app is beta-only as of provider 6.x.
+provider "google-beta" {
+  project               = var.project_id
+  region                = var.region
+  user_project_override = true
+  billing_project       = var.project_id
 }
 
 resource "google_project_service" "apigee" {
@@ -45,6 +59,18 @@ resource "google_project_service" "artifactregistry" {
 resource "google_project_service" "secretmanager" {
   project            = var.project_id
   service            = "secretmanager.googleapis.com"
+  disable_on_destroy = false
+}
+
+resource "google_project_service" "identitytoolkit" {
+  project            = var.project_id
+  service            = "identitytoolkit.googleapis.com"
+  disable_on_destroy = false
+}
+
+resource "google_project_service" "cloudresourcemanager" {
+  project            = var.project_id
+  service            = "cloudresourcemanager.googleapis.com"
   disable_on_destroy = false
 }
 
@@ -489,4 +515,53 @@ resource "google_dns_record_set" "rps_a" {
   type         = "A"
   ttl          = 300
   rrdatas      = [google_compute_global_address.lb_ip.address]
+}
+
+# Identity Platform (the underlying service behind Firebase Auth) - config
+# only, no secrets. Enabling Google as a sign-in provider still requires one
+# manual step in the Firebase Console (Authentication > Sign-in method >
+# Google > Enable): the underlying Terraform resource for that,
+# google_identity_platform_default_supported_idp_config, takes a plaintext
+# client_secret with no state-avoidance mechanism, which CLAUDE.md's
+# secrets-never-in-state rule rules out. The console flow creates the OAuth
+# client and registers it as the IdP in one step, so the secret never
+# touches Tofu, state, or this repo at all.
+resource "google_identity_platform_config" "auth" {
+  project = var.project_id
+
+  authorized_domains = [
+    "localhost",
+    var.lb_domain,
+    "${var.project_id}.firebaseapp.com",
+    "${var.project_id}.web.app",
+  ]
+
+  # Sign-up abuse guard, same spirit as the WAF's per-IP rate limit below.
+  quota {
+    sign_up_quota_config {
+      quota          = 100
+      quota_duration = "3600s"
+      start_time     = "2026-08-09T00:00:00Z"
+    }
+  }
+
+  depends_on = [google_project_service.identitytoolkit]
+}
+
+# Registers a Firebase "Web App" purely to get an apiKey/authDomain pair for
+# the JS SDK - this is metadata, not a secret (Firebase web API keys are
+# meant to be public/client-embedded, unlike an OAuth client_secret).
+resource "google_firebase_web_app" "rps" {
+  provider = google-beta
+  project  = var.project_id
+
+  display_name    = "RPS game (web)"
+  deletion_policy = "DELETE"
+
+  depends_on = [google_identity_platform_config.auth]
+}
+
+data "google_firebase_web_app_config" "rps" {
+  provider   = google-beta
+  web_app_id = google_firebase_web_app.rps.app_id
 }
