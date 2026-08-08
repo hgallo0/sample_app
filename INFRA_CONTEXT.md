@@ -37,8 +37,7 @@ the assigned IP's range.
 | Cloud SQL instance | `rps-postgres` (Postgres 16, `db-f1-micro`, edition `ENTERPRISE`, zonal, no HA/backups) |
 | Postgres private IP | `10.16.80.3` |
 | Postgres database | `rps` |
-| Postgres user | `rps_app` |
-| Postgres password | **not in Terraform state.** Held in Secret Manager, secret ID `rps-db-password` (`tofu output db_password_secret_id`). Fetch at runtime with `gcloud secrets versions access latest --secret=rps-db-password --project=backend-500517`, or via the Secret Manager client library from `game-api`'s runtime service account (already granted `roles/secretmanager.secretAccessor` on this secret). |
+| Postgres auth | **IAM DB auth, no password at all.** `cloudsql.iam_authentication` is on; the runtime service account (`tofu output db_iam_user`) is registered as a `CLOUD_IAM_SERVICE_ACCOUNT` SQL user with `roles/cloudsql.instanceUser` + `roles/cloudsql.client`. Connect via the Cloud SQL Python Connector (`enable_iam_auth=True`) or equivalent — never a static credential. |
 | Redis instance | `rps-leaderboard-cache` (`BASIC`, 1GB, `PRIVATE_SERVICE_ACCESS`, no AUTH — network-isolated only) |
 | Redis host | `10.120.115.11` (port 6379, default) |
 
@@ -92,17 +91,14 @@ untouched):
 ## Secrets policy
 
 Per `CLAUDE.md`: no secret values live in Terraform/OpenTofu state, ever.
-- `google_sql_user.rps_app` has no `password` in config and
-  `lifecycle { ignore_changes = [password] }` — the value is set manually
-  via `gcloud sql users set-password`.
-- The same value is also stored in Secret Manager (`rps-db-password`) via a
-  `google_secret_manager_secret` container + IAM binding managed in Tofu —
-  but the secret *version* (the actual value) was added out-of-band via
-  `gcloud secrets versions add`, never through a
-  `google_secret_manager_secret_version` resource, so it never touches state.
-- If the live build needs the DB password, resolve it through Secret
-  Manager (see table above) — don't ask Henry, and don't look in
-  `terraform.tfstate` or `tofu output`.
+The DB layer goes further than "don't store the password carefully" —
+there is no password at all. IAM DB auth means the runtime service account
+authenticates as itself with a short-lived token; there's nothing to fetch,
+rotate, or leak. If any future secret is genuinely needed, follow the same
+pattern already established for the (now-removed) DB password: manage only
+the Secret Manager container + IAM binding in Tofu, add the actual value
+out-of-band via `gcloud secrets versions add`, never a
+`google_secret_manager_secret_version` resource with the value inline.
 
 ## What's still a placeholder / deferred to the live build
 

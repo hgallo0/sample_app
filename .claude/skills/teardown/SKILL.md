@@ -20,11 +20,11 @@ tofu apply
 With `main.tf` back to its committed state, this drives the Cloud Run service back to the placeholder image (`us-docker.pkg.dev/cloudrun/container/hello`). Show the plan before applying, same as `/safe-pr` does — don't apply blind.
 
 ## 3. Reset data
-- Postgres: truncate the `rps` database's tables (not drop the database/instance) so leaderboard/history data doesn't leak between rehearsal runs. Connect via the private IP (`INFRA_CONTEXT.md`) and the password from Secret Manager (`rps-db-password`) — never read it from state.
+- Postgres: truncate the app database's tables (not drop the database/instance) so leaderboard/history data doesn't leak between rehearsal runs. Connect via IAM auth (see `INFRA_CONTEXT.md` for the connection details) as `game_api_iam` - never use the `postgres` admin credentials for this. The `postgres-root-password` secret exists solely for one-off schema/permission admin work and must never be rotated, deleted, or touched by this flow.
 - Redis: `FLUSHDB` on the leaderboard cache, not a full instance restart.
 
 ## 4. Local build artifact cleanup
-Remove locally-built Docker images from the rehearsal cycle (`docker images | grep game-api`, then `docker rmi`) so disk doesn't fill up across repeated cycles. Don't touch Artifact Registry-hosted images unless the user asks — pushed images are cheap to leave and useful for debugging a bad rehearsal after the fact.
+Remove locally-built Docker images from this rehearsal cycle (check `docker images` for anything matching what `/build-push` just built, then `docker rmi`) so disk doesn't fill up across repeated cycles. Don't touch Artifact Registry-hosted images unless the user asks — pushed images are cheap to leave and useful for debugging a bad rehearsal after the fact.
 
 ## 5. Rehearsal git tags (ask first)
 If `/build-push` pushed `vX.Y.Z` tags to `origin` during this rehearsal cycle, they'll pollute real release history. This step is **not automatic** — ask the user whether to delete the tag(s) (`git tag -d`, `git push origin :refs/tags/vX.Y.Z`) before doing it, since it rewrites shared remote history.
