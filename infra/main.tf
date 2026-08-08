@@ -36,6 +36,12 @@ resource "google_project_service" "dns" {
   disable_on_destroy = false
 }
 
+resource "google_project_service" "artifactregistry" {
+  project            = var.project_id
+  service            = "artifactregistry.googleapis.com"
+  disable_on_destroy = false
+}
+
 resource "google_project_service" "secretmanager" {
   project            = var.project_id
   service            = "secretmanager.googleapis.com"
@@ -48,6 +54,12 @@ data "google_project" "current" {
 
 data "google_compute_network" "default" {
   project = var.project_id
+  name    = "default"
+}
+
+data "google_compute_subnetwork" "default" {
+  project = var.project_id
+  region  = var.region
   name    = "default"
 }
 
@@ -147,6 +159,14 @@ resource "google_sql_database_instance" "postgres" {
     backup_configuration {
       enabled = false
     }
+
+    # IAM DB auth, not a password - game-api's runtime service account
+    # authenticates as itself (short-lived OAuth token), no static
+    # credential to store, rotate, or leak, ever.
+    database_flags {
+      name  = "cloudsql.iam_authentication"
+      value = "on"
+    }
   }
 
   depends_on = [google_service_networking_connection.psa_connection]
@@ -157,26 +177,12 @@ resource "google_sql_database" "rps" {
   instance = google_sql_database_instance.postgres.name
 }
 
-# Password is set out-of-band (gcloud/console), never through Terraform -
-# best practice per CLAUDE.md: passwords should never live in state, since
-# anyone with state read access can see them in plaintext.
-resource "google_sql_user" "rps_app" {
-  name     = "rps_app"
-  instance = google_sql_database_instance.postgres.name
-
-  lifecycle {
-    ignore_changes = [password]
-  }
-}
-
-# Container only - no google_secret_manager_secret_version here. The actual
-# password value is added out-of-band (gcloud) so it never enters Tofu state,
-# same reasoning as the sql_user password above. game-api's runtime service
-# account reads it directly from Secret Manager instead of it being handed
-# to/asked from Henry.
-resource "google_secret_manager_secret" "db_password" {
+# Container only, no version - the postgres built-in admin user's password
+# is set out-of-band via `gcloud sql users set-password` and the value is
+# added here manually via `gcloud secrets versions add`, never through Tofu.
+resource "google_secret_manager_secret" "postgres_root_password" {
   project   = var.project_id
-  secret_id = "rps-db-password"
+  secret_id = "postgres-root-password"
 
   replication {
     auto {}
@@ -185,12 +191,29 @@ resource "google_secret_manager_secret" "db_password" {
   depends_on = [google_project_service.secretmanager]
 }
 
-resource "google_secret_manager_secret_iam_member" "db_password_accessor" {
-  project   = var.project_id
-  secret_id = google_secret_manager_secret.db_password.secret_id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${data.google_project.current.number}-compute@developer.gserviceaccount.com"
+# IAM database user for game-api's runtime identity - no password field at
+# all, nothing to leak into state. Cloud SQL requires the service account
+# email with ".gserviceaccount.com" stripped here.
+resource "google_sql_user" "game_api_iam" {
+  name     = "${data.google_project.current.number}-compute@developer"
+  instance = google_sql_database_instance.postgres.name
+  type     = "CLOUD_IAM_SERVICE_ACCOUNT"
 }
+
+# Required in addition to the IAM DB user above - grants the identity
+# permission to authenticate to Cloud SQL via IAM at all.
+resource "google_project_iam_member" "game_api_cloudsql_instance_user" {
+  project = var.project_id
+  role    = "roles/cloudsql.instanceUser"
+  member  = "serviceAccount:${data.google_project.current.number}-compute@developer.gserviceaccount.com"
+}
+
+resource "google_project_iam_member" "game_api_cloudsql_client" {
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${data.google_project.current.number}-compute@developer.gserviceaccount.com"
+}
+
 
 # BASIC tier (no HA replica), 1GB - cheapest option, same reasoning as above.
 resource "google_redis_instance" "leaderboard_cache" {
@@ -208,6 +231,19 @@ resource "google_redis_instance" "leaderboard_cache" {
   ]
 }
 
+# Holds both game-api and game-engine images. Created via Tofu even though
+# it's fast/live-session-friendly infra - GCP resources are never created
+# imperatively with gcloud in this repo, see CLAUDE.md.
+resource "google_artifact_registry_repository" "rps_images" {
+  project       = var.project_id
+  location      = var.region
+  repository_id = "rps-images"
+  format        = "DOCKER"
+  description   = "RPS game images (game-api, game-engine)"
+
+  depends_on = [google_project_service.artifactregistry]
+}
+
 # Placeholder backend so the LB + managed cert (the slow part) can
 # provision now. Swapped for the real game-api service during the live
 # build - same Cloud Run service name, new revision, LB stays untouched.
@@ -215,10 +251,85 @@ resource "google_cloud_run_v2_service" "placeholder" {
   project  = var.project_id
   name     = "game-api"
   location = var.region
+  # Rehearsal env, not production - services get torn down/recreated
+  # between sessions, so protection would just block that.
+  deletion_protection = false
   # Load balancer only - blocks direct internet access to the *.run.app
   # URL, only traffic arriving via the Serverless NEG/load balancer below
   # is accepted. Paired with the public invoker binding below by design.
   ingress = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
+
+  template {
+    # Ties the deployed revision to the image tag - also forces a fresh
+    # revision on redeploy even when the image string itself is unchanged
+    # (e.g. retrying after an external fix, not a new build).
+    labels = {
+      app-version = "v0-3-0"
+    }
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 1
+    }
+    # Direct VPC egress - game-api needs a network path to Cloud SQL/Redis's
+    # private IPs (PSA-peered), which Cloud Run has no route to by default.
+    # PRIVATE_RANGES_ONLY keeps public-internet egress off the VPC path.
+    vpc_access {
+      network_interfaces {
+        network    = data.google_compute_network.default.name
+        subnetwork = data.google_compute_subnetwork.default.name
+      }
+      egress = "PRIVATE_RANGES_ONLY"
+    }
+    containers {
+      image = "us-central1-docker.pkg.dev/backend-500517/rps-images/game-api:v0.3.0"
+      env {
+        name  = "PROJECT_ID"
+        value = var.project_id
+      }
+      env {
+        name  = "REGION"
+        value = var.region
+      }
+      env {
+        name  = "DB_IAM_USER"
+        value = "${data.google_project.current.number}-compute@developer"
+      }
+      env {
+        name  = "REDIS_HOST"
+        value = google_redis_instance.leaderboard_cache.host
+      }
+      env {
+        name  = "GAME_ENGINE_URL"
+        value = google_cloud_run_v2_service.game_engine.uri
+      }
+    }
+  }
+}
+
+resource "google_cloud_run_v2_service_iam_member" "placeholder_public" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.placeholder.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+# Go RPS game-engine service - internal only, not fronted by the LB and no
+# public invoker. Ingress restricted to same-project Cloud Run/internal
+# traffic, invoker restricted to game-api's own runtime identity, so only
+# game-api can ever call it. Placeholder image swapped for the real build
+# during the live session, same as game-api.
+resource "google_cloud_run_v2_service" "game_engine" {
+  project  = var.project_id
+  name     = "game-engine"
+  location = var.region
+  # Rehearsal env, not production - services get torn down/recreated
+  # between sessions, so protection would just block that.
+  deletion_protection = false
+  # Internal only - no LB, no public internet path at all. Reachable only
+  # from other Cloud Run/serverless resources in this project over Google's
+  # internal network. Paired with the invoker restriction below.
+  ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY"
 
   template {
     scaling {
@@ -231,12 +342,14 @@ resource "google_cloud_run_v2_service" "placeholder" {
   }
 }
 
-resource "google_cloud_run_v2_service_iam_member" "placeholder_public" {
+resource "google_cloud_run_v2_service_iam_member" "game_engine_invoker" {
   project  = var.project_id
   location = var.region
-  name     = google_cloud_run_v2_service.placeholder.name
+  name     = google_cloud_run_v2_service.game_engine.name
   role     = "roles/run.invoker"
-  member   = "allUsers"
+  # game-api's own runtime identity - same default compute SA both services
+  # run as. Not allUsers: this service has no public path at all.
+  member = "serviceAccount:${data.google_project.current.number}-compute@developer.gserviceaccount.com"
 }
 
 resource "google_compute_region_network_endpoint_group" "game_api_neg" {
