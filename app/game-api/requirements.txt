@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+pg8000
+cloud-sql-python-connector[pg8000]
+redis
+firebase-admin
+google-auth
+httpx

@@ -42,12 +42,24 @@ resource "google_project_service" "artifactregistry" {
   disable_on_destroy = false
 }
 
+resource "google_project_service" "secretmanager" {
+  project            = var.project_id
+  service            = "secretmanager.googleapis.com"
+  disable_on_destroy = false
+}
+
 data "google_project" "current" {
   project_id = var.project_id
 }
 
 data "google_compute_network" "default" {
   project = var.project_id
+  name    = "default"
+}
+
+data "google_compute_subnetwork" "default" {
+  project = var.project_id
+  region  = var.region
   name    = "default"
 }
 
@@ -165,6 +177,20 @@ resource "google_sql_database" "rps" {
   instance = google_sql_database_instance.postgres.name
 }
 
+# Container only, no version - the postgres built-in admin user's password
+# is set out-of-band via `gcloud sql users set-password` and the value is
+# added here manually via `gcloud secrets versions add`, never through Tofu.
+resource "google_secret_manager_secret" "postgres_root_password" {
+  project   = var.project_id
+  secret_id = "postgres-root-password"
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.secretmanager]
+}
+
 # IAM database user for game-api's runtime identity - no password field at
 # all, nothing to leak into state. Cloud SQL requires the service account
 # email with ".gserviceaccount.com" stripped here.
@@ -225,18 +251,57 @@ resource "google_cloud_run_v2_service" "placeholder" {
   project  = var.project_id
   name     = "game-api"
   location = var.region
+  # Rehearsal env, not production - services get torn down/recreated
+  # between sessions, so protection would just block that.
+  deletion_protection = false
   # Load balancer only - blocks direct internet access to the *.run.app
   # URL, only traffic arriving via the Serverless NEG/load balancer below
   # is accepted. Paired with the public invoker binding below by design.
   ingress = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
 
   template {
+    # Ties the deployed revision to the image tag - also forces a fresh
+    # revision on redeploy even when the image string itself is unchanged
+    # (e.g. retrying after an external fix, not a new build).
+    labels = {
+      app-version = "v0-3-0"
+    }
     scaling {
       min_instance_count = 0
       max_instance_count = 1
     }
+    # Direct VPC egress - game-api needs a network path to Cloud SQL/Redis's
+    # private IPs (PSA-peered), which Cloud Run has no route to by default.
+    # PRIVATE_RANGES_ONLY keeps public-internet egress off the VPC path.
+    vpc_access {
+      network_interfaces {
+        network    = data.google_compute_network.default.name
+        subnetwork = data.google_compute_subnetwork.default.name
+      }
+      egress = "PRIVATE_RANGES_ONLY"
+    }
     containers {
-      image = "us-docker.pkg.dev/cloudrun/container/hello"
+      image = "us-central1-docker.pkg.dev/backend-500517/rps-images/game-api:v0.3.0"
+      env {
+        name  = "PROJECT_ID"
+        value = var.project_id
+      }
+      env {
+        name  = "REGION"
+        value = var.region
+      }
+      env {
+        name  = "DB_IAM_USER"
+        value = "${data.google_project.current.number}-compute@developer"
+      }
+      env {
+        name  = "REDIS_HOST"
+        value = google_redis_instance.leaderboard_cache.host
+      }
+      env {
+        name  = "GAME_ENGINE_URL"
+        value = google_cloud_run_v2_service.game_engine.uri
+      }
     }
   }
 }
@@ -258,6 +323,9 @@ resource "google_cloud_run_v2_service" "game_engine" {
   project  = var.project_id
   name     = "game-engine"
   location = var.region
+  # Rehearsal env, not production - services get torn down/recreated
+  # between sessions, so protection would just block that.
+  deletion_protection = false
   # Internal only - no LB, no public internet path at all. Reachable only
   # from other Cloud Run/serverless resources in this project over Google's
   # internal network. Paired with the invoker restriction below.
