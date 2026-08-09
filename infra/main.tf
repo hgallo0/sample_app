@@ -89,6 +89,32 @@ data "google_compute_subnetwork" "default" {
   name    = "default"
 }
 
+# game-api's vpc_access egress is ALL_TRAFFIC (not just private ranges) so
+# its calls to game-engine's *.run.app URL route through the VPC and get
+# recognized as internal Cloud-Run-to-Cloud-Run traffic by game-engine's
+# INGRESS_TRAFFIC_INTERNAL_ONLY - otherwise those calls go out over the
+# normal internet path and get rejected as external. But routing ALL
+# traffic through the VPC means calls to public Google APIs (Cloud SQL IAM
+# token fetch, Firebase cert verification) need a way out to the internet
+# too, since VPC instances without external IPs have none by default -
+# without this NAT, game-api fails to even start (Cloud SQL IAM auth runs
+# at import time and hangs trying to reach oauth2.googleapis.com).
+resource "google_compute_router" "default" {
+  project = var.project_id
+  name    = "rps-router"
+  region  = var.region
+  network = data.google_compute_network.default.name
+}
+
+resource "google_compute_router_nat" "default" {
+  project                            = var.project_id
+  name                               = "rps-nat"
+  router                             = google_compute_router.default.name
+  region                             = var.region
+  nat_ip_allocate_option             = "AUTO_ONLY"
+  source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
+}
+
 # Private Services Access: reserves an internal IP range and hands it to
 # Google's service producer network so managed services (Apigee's runtime
 # plane here) get a private address inside our VPC.
@@ -298,13 +324,20 @@ resource "google_cloud_run_v2_service" "placeholder" {
     }
     # Direct VPC egress - game-api needs a network path to Cloud SQL/Redis's
     # private IPs (PSA-peered), which Cloud Run has no route to by default.
-    # PRIVATE_RANGES_ONLY keeps public-internet egress off the VPC path.
+    # ALL_TRAFFIC, not PRIVATE_RANGES_ONLY: game-engine's *.run.app URL
+    # resolves to a public IP, so PRIVATE_RANGES_ONLY would send that call
+    # out over the normal internet path instead of the VPC - and
+    # game-engine's INGRESS_TRAFFIC_INTERNAL_ONLY then silently 404s it,
+    # since it no longer looks like same-project Cloud Run traffic. Calls to
+    # Google's own public APIs (Firebase cert verification) still work fine
+    # over ALL_TRAFFIC - it routes through the VPC's default internet route,
+    # it doesn't block internet egress.
     vpc_access {
       network_interfaces {
         network    = data.google_compute_network.default.name
         subnetwork = data.google_compute_subnetwork.default.name
       }
-      egress = "PRIVATE_RANGES_ONLY"
+      egress = "ALL_TRAFFIC"
     }
     containers {
       image = "us-central1-docker.pkg.dev/backend-500517/rps-images/game-api:v0.3.0"
@@ -363,7 +396,7 @@ resource "google_cloud_run_v2_service" "game_engine" {
       max_instance_count = 1
     }
     containers {
-      image = "us-docker.pkg.dev/cloudrun/container/hello"
+      image = "us-central1-docker.pkg.dev/backend-500517/rps-images/game-engine:v0.1.0"
     }
   }
 }
