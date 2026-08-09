@@ -361,6 +361,21 @@ resource "google_cloud_run_v2_service" "placeholder" {
         name  = "GAME_ENGINE_URL"
         value = google_cloud_run_v2_service.game_engine.uri
       }
+      # Cloud Run's default startup probe (period_seconds=240,
+      # failure_threshold=1) gives only one 240s window with no retries.
+      # Google's own Direct VPC egress docs warn cold-start connection
+      # establishment can take "a minute or more" and recommend a startup
+      # probe with retries - this gives up to ~3x the window (three 240s
+      # attempts) before giving up, since ALL_TRAFFIC egress routes even
+      # the Cloud SQL Admin API call through the VPC/NAT path now.
+      startup_probe {
+        tcp_socket {
+          port = 8080
+        }
+        period_seconds    = 240
+        timeout_seconds   = 10
+        failure_threshold = 3
+      }
     }
   }
 }
