@@ -340,7 +340,11 @@ resource "google_cloud_run_v2_service" "placeholder" {
       egress = "ALL_TRAFFIC"
     }
     containers {
-      image = "us-central1-docker.pkg.dev/backend-500517/rps-images/game-api:v0.3.0"
+      # Reset to the original placeholder for the timed live-build rehearsal
+      # - the build+push+deploy cycle itself is in scope to demonstrate live,
+      # per PLAN.md's Prep-scope rule. Env vars/VPC egress/startup probe stay
+      # as-is: that's infra wiring, not the live-build deliverable.
+      image = "us-docker.pkg.dev/cloudrun/container/hello"
       env {
         name  = "PROJECT_ID"
         value = var.project_id
@@ -411,7 +415,8 @@ resource "google_cloud_run_v2_service" "game_engine" {
       max_instance_count = 1
     }
     containers {
-      image = "us-central1-docker.pkg.dev/backend-500517/rps-images/game-engine:v0.1.0"
+      # Same rehearsal reset as game-api's placeholder above.
+      image = "us-docker.pkg.dev/cloudrun/container/hello"
     }
   }
 }
