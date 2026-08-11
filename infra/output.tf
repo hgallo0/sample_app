@@ -11,11 +11,11 @@ output "apigee_envgroup_hostnames" {
 }
 
 output "postgres_private_ip" {
-  value = google_sql_database_instance.postgres.private_ip_address
+  value = module.base_infra.postgres_private_ip
 }
 
 output "redis_host" {
-  value = google_redis_instance.leaderboard_cache.host
+  value = module.base_infra.redis_host
 }
 
 output "lb_ip_address" {
