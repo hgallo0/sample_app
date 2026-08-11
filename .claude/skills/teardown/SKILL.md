@@ -1,6 +1,6 @@
 ---
 name: teardown
-description: Reset the app layer (Cloud Run image, DB data, cache, Apigee proxy routing) back to a clean rehearsal baseline without touching the slow-to-provision infra (LB, cert, Apigee org, Cloud SQL/Redis instances, or the frontend) themselves. Use between rehearsal cycles, not after the real interview.
+description: Reset the app layer (Cloud Run image, Apigee proxy routing, local build artifacts) back to a clean rehearsal baseline without touching the slow-to-provision infra (LB, cert, Apigee org, Cloud SQL/Redis instances, or the frontend) or any data in Postgres/Redis, which are left alone on the user's standing instruction. Use between rehearsal cycles, not after the real interview.
 ---
 
 Reset everything fast-to-rebuild back to baseline so the next rehearsal cycle starts clean. This is the counterpart to `/build-push` and `/safe-pr` — it never touches the slow infra those two also leave alone (LB, managed cert, Apigee org, the Cloud SQL/Redis instances themselves stay running throughout all rehearsal cycles).
@@ -23,9 +23,8 @@ With `main.tf` back to its committed state, this drives the Cloud Run services b
 
 **Known ordering gotcha**: if the plan includes both destroying `google_compute_backend_service.apigee`/`apigee_psc_neg` *and* updating `google_compute_url_map.game_api`, a single `tofu apply` can fail with `resourceInUseByAnotherResource` - the destroys can race ahead of the `url_map` update that stops referencing them. If that happens, apply the `url_map` update alone first (`tofu apply -target=google_compute_url_map.game_api`), then re-run the full apply - this has come up more than once, it's not a one-off fluke.
 
-## 3. Reset data
-- Postgres: truncate the app database's tables (not drop the database/instance) so leaderboard/history data doesn't leak between rehearsal runs. Connect via IAM auth (see `INFRA_CONTEXT.md` for the connection details) as `game_api_iam` - never use the `postgres` admin credentials for this. The `postgres-root-password` secret exists solely for one-off schema/permission admin work and must never be rotated, deleted, or touched by this flow.
-- Redis: `FLUSHDB` on the leaderboard cache, not a full instance restart.
+## 3. Data stores - leave alone
+Neither Postgres nor Redis get touched by this skill, on the user's explicit standing instruction (asked and confirmed more than once) - don't truncate tables, don't `FLUSHDB`, don't offer to. Stale/rehearsal game data in either store is fine to leave. If disk/quota ever becomes a real problem, that's a separate, explicitly-requested action, not a default teardown step.
 
 ## 4. Local build artifact cleanup
 Remove locally-built Docker images from this rehearsal cycle (check `docker images` for anything matching what `/build-push` just built, then `docker rmi`) so disk doesn't fill up across repeated cycles. Don't touch Artifact Registry-hosted images unless the user asks — pushed images are cheap to leave and useful for debugging a bad rehearsal after the fact.
@@ -34,4 +33,4 @@ Remove locally-built Docker images from this rehearsal cycle (check `docker imag
 If `/build-push` pushed `vX.Y.Z` tags to `origin` during this rehearsal cycle, they'll pollute real release history. This step is **not automatic** — ask the user whether to delete the tag(s) (`git tag -d`, `git push origin :refs/tags/vX.Y.Z`) before doing it, since it rewrites shared remote history.
 
 ## 6. Report
-Confirm: Cloud Run is back on the placeholder image, any live-built Apigee routing (PSC NEG/backend/envgroup hostname) is torn down, the frontend is still live at `/` (unchanged - that's expected, not a leftover), Postgres tables are empty, Redis is flushed, local rehearsal images are cleaned up. State clearly if any step was skipped (e.g. user declined tag cleanup) so the next cycle starts from a known state, not an assumed one.
+Confirm: Cloud Run is back on the placeholder image, any live-built Apigee routing (PSC NEG/backend/envgroup hostname) is torn down, the frontend is still live at `/` (unchanged - that's expected, not a leftover), local rehearsal images are cleaned up, and Postgres/Redis were deliberately left untouched (not an omission). State clearly if any step was skipped for another reason (e.g. user declined tag cleanup) so the next cycle starts from a known state, not an assumed one.
