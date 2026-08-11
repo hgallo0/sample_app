@@ -43,6 +43,16 @@ the assigned IP's range.
 | Redis instance | `rps-leaderboard-cache` (`BASIC`, 1GB, `PRIVATE_SERVICE_ACCESS`, no AUTH — network-isolated only) |
 | Redis host | `10.120.115.11` (port 6379, default) |
 
+**Admin read access to `game_api` schema is permanent, standing infra — do not revoke, don't re-derive from scratch:** the app tables live in a `game_api` schema (not `public`), owned by game-api's own IAM role since it's the one that runs `Base.metadata.create_all()`. Cloud SQL's built-in `postgres` user is only a `cloudsqlsuperuser`, not a true Postgres superuser, so it has no visibility into another role's tables by default — this was fixed once, manually, via Cloud SQL Studio (not Tofu-managed, no resource type covers arbitrary `GRANT`s):
+```sql
+GRANT "<db_iam_user>" TO postgres;
+SET ROLE "<db_iam_user>";
+GRANT USAGE ON SCHEMA game_api TO postgres;
+GRANT SELECT ON ALL TABLES IN SCHEMA game_api TO postgres;
+RESET ROLE;
+```
+`postgres` can now log into Cloud SQL Studio and read `game_api.*` directly. This survives Cloud Run redeploys/image swaps (it's a database-level grant, not tied to any revision) — it would only be lost if the Cloud SQL instance itself were destroyed and recreated.
+
 ## Load balancer / edge
 
 | Resource | Value |
