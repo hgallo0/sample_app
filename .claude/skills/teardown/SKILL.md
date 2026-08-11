@@ -23,14 +23,25 @@ With `main.tf` back to its committed state, this drives the Cloud Run services b
 
 **Known ordering gotcha**: if the plan includes both destroying `google_compute_backend_service.apigee`/`apigee_psc_neg` *and* updating `google_compute_url_map.game_api`, a single `tofu apply` can fail with `resourceInUseByAnotherResource` - the destroys can race ahead of the `url_map` update that stops referencing them. If that happens, apply the `url_map` update alone first (`tofu apply -target=google_compute_url_map.game_api`), then re-run the full apply - this has come up more than once, it's not a one-off fluke.
 
-## 3. Data stores - leave alone
+## 3. Undeploy the Apigee proxy bundle
+The API proxy revision itself (e.g. `game-api-proxy`) is deployed via direct Apigee Management API calls, not a Tofu resource - reverting `main.tf` in step 2 destroys the PSC NEG/backend/envgroup hostname but does **not** undeploy the proxy bundle from the `eval` environment. Left in place, it silently blocks the next `apigee-proxy` run with `CONFLICTING_DEPLOYMENT` on the same base path - this has already happened once and cost real time mid-rehearsal debugging it live instead of catching it here.
+```
+gcloud apigee deployments list --organization=backend-500517 --environment=eval
+```
+For each `API_PROXY` shown, undeploy it:
+```
+gcloud apigee apis undeploy --organization=backend-500517 --environment=eval --api=<API_PROXY>
+```
+(`gcloud apigee apis undeploy` is a real, verified subcommand - unlike `gcloud apigee instances describe` or `gcloud apigee organizations describe`, which don't exist in this gcloud version at all; see the "Apigee CLI gotchas" note in `INFRA_CONTEXT.md` before reaching for any `gcloud apigee` command not already used elsewhere in this repo.) Leave the underlying API proxy *definition* (`gcloud apigee apis list`) in place - only the deployment needs clearing.
+
+## 5. Data stores - leave alone
 Neither Postgres nor Redis get touched by this skill, on the user's explicit standing instruction (asked and confirmed more than once) - don't truncate tables, don't `FLUSHDB`, don't offer to. Stale/rehearsal game data in either store is fine to leave. If disk/quota ever becomes a real problem, that's a separate, explicitly-requested action, not a default teardown step.
 
-## 4. Local build artifact cleanup
+## 6. Local build artifact cleanup
 Remove locally-built Docker images from this rehearsal cycle (check `docker images` for anything matching what `/build-push` just built, then `docker rmi`) so disk doesn't fill up across repeated cycles. Don't touch Artifact Registry-hosted images unless the user asks — pushed images are cheap to leave and useful for debugging a bad rehearsal after the fact.
 
-## 5. Rehearsal git tags (ask first)
-If `/build-push` pushed `vX.Y.Z` tags to `origin` during this rehearsal cycle, they'll pollute real release history. This step is **not automatic** — ask the user whether to delete the tag(s) (`git tag -d`, `git push origin :refs/tags/vX.Y.Z`) before doing it, since it rewrites shared remote history.
+## 7. Rehearsal git tags (ask first)
+If `/build-push` pushed `<service>-vX.Y.Z` tags to `origin` during this rehearsal cycle, they'll pollute real release history. This step is **not automatic** — ask the user whether to delete the tag(s) (`git tag -d`, `git push origin :refs/tags/<service>-vX.Y.Z`) before doing it, since it rewrites shared remote history.
 
-## 6. Report
-Confirm: Cloud Run is back on the placeholder image, any live-built Apigee routing (PSC NEG/backend/envgroup hostname) is torn down, the frontend is still live at `/` (unchanged - that's expected, not a leftover), local rehearsal images are cleaned up, and Postgres/Redis were deliberately left untouched (not an omission). State clearly if any step was skipped for another reason (e.g. user declined tag cleanup) so the next cycle starts from a known state, not an assumed one.
+## 8. Report
+Confirm: Cloud Run is back on the placeholder image, any live-built Apigee routing (PSC NEG/backend/envgroup hostname) is torn down, the Apigee proxy bundle is undeployed from `eval` (step 3 - `gcloud apigee deployments list` should come back empty), the frontend is still live at `/` (unchanged - that's expected, not a leftover), local rehearsal images are cleaned up, and Postgres/Redis were deliberately left untouched (not an omission). State clearly if any step was skipped for another reason (e.g. user declined tag cleanup) so the next cycle starts from a known state, not an assumed one.
