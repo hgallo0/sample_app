@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>RPS - Google SSO verification (throwaway, not app code)</title>
+<style>
+  body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 640px; margin: 48px auto; padding: 0 20px; color: #16202A; }
+  button { font-size: 15px; padding: 10px 18px; border-radius: 8px; border: 1px solid #7C8791; background: #fff; cursor: pointer; }
+  button:hover { background: #f3f5f6; }
+  pre { background: #f3f5f6; padding: 14px; border-radius: 8px; overflow-x: auto; font-size: 12.5px; white-space: pre-wrap; word-break: break-all; }
+  .row { margin: 18px 0; }
+  .ok { color: #157A73; font-weight: 600; }
+  .err { color: #b3261e; font-weight: 600; }
+  label { display: block; font-size: 12px; color: #55636D; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+  <h1>Google SSO verification</h1>
+  <p>Dev-only sign-in helper, not part of <code>app/</code>. Mints a real Firebase ID token for testing against the live API without going through the real frontend.</p>
+
+  <div class="row">
+    <button id="signin">Sign in with Google</button>
+    <span id="status"></span>
+  </div>
+
+  <div class="row" id="result" style="display:none">
+    <label>Decoded token claims</label>
+    <pre id="claims"></pre>
+
+    <label>Raw ID token (copy this to hand back for server-side verification)</label>
+    <textarea id="token" readonly style="width:100%; height:90px; font-family: ui-monospace, monospace; font-size: 11px;"></textarea>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+    import { getAuth, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBcs4YXHex7sVsUQmLi-sWyoh-nf2uMv00",
+      authDomain: "backend-500517.firebaseapp.com",
+      projectId: "backend-500517",
+      appId: "1:923334354359:web:f7335bbf4f1c449471b432",
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const provider = new GoogleAuthProvider();
+
+    function decodeJwt(token) {
+      const payload = token.split(".")[1];
+      const json = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
+      return JSON.parse(json);
+    }
+
+    document.getElementById("signin").addEventListener("click", async () => {
+      const statusEl = document.getElementById("status");
+      statusEl.textContent = " signing in…";
+      statusEl.className = "";
+      try {
+        const cred = await signInWithPopup(auth, provider);
+        const token = await cred.user.getIdToken();
+        const claims = decodeJwt(token);
+
+        statusEl.textContent = ` ✓ signed in as ${cred.user.email}`;
+        statusEl.className = "ok";
+
+        document.getElementById("result").style.display = "block";
+        document.getElementById("claims").textContent = JSON.stringify(
+          {
+            iss: claims.iss,
+            aud: claims.aud,
+            uid: claims.user_id || claims.sub,
+            email: claims.email,
+            iat: new Date(claims.iat * 1000).toISOString(),
+            exp: new Date(claims.exp * 1000).toISOString(),
+          },
+          null,
+          2
+        );
+        document.getElementById("token").value = token;
+      } catch (err) {
+        statusEl.textContent = ` ✗ ${err.code || err.message}`;
+        statusEl.className = "err";
+        console.error(err);
+      }
+    });
+  </script>
+</body>
+</html>
