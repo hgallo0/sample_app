@@ -8,6 +8,10 @@ terraform {
       source  = "hashicorp/google-beta"
       version = "~> 6.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
   }
 }
 
@@ -178,8 +182,10 @@ resource "google_apigee_instance_attachment" "eval_attachment" {
 }
 
 resource "google_apigee_envgroup" "eval_envgroup" {
-  org_id    = google_apigee_organization.org.id
-  name      = "eval-group"
+  org_id = google_apigee_organization.org.id
+  name   = "eval-group"
+  # Placeholder on purpose - fixing this to the real domain is part of the
+  # live-build deliverable (see .claude/agents/apigee-proxy.md step 1).
   hostnames = ["eval.example.com"]
 }
 
@@ -303,6 +309,20 @@ resource "google_cloud_run_v2_service" "placeholder" {
   project  = var.project_id
   name     = "game-api"
   location = var.region
+
+  # A service-level `scaling` block (distinct from template.scaling below,
+  # which stays managed) shows up as drift under provider ~> 6.0 - state has
+  # it (manual_instance_count=0, min_instance_count=0, i.e. already the
+  # provider's own defaults, not a real live setting anyone configured), but
+  # this config never declared it, so every plan wants to remove it. Ignored
+  # here rather than applied blind: this resource is out of scope for the
+  # Apigee routing change, and it's pulled into that change's plan only
+  # because the new url_map route_rule references this service's existing
+  # backend (via game-api-backend / game-api-neg) - removing this attribute
+  # is very likely a no-op against the live service (values already match
+  # defaults), but "very likely" isn't the bar for touching an
+  # already-serving Cloud Run service as a side effect of an unrelated
+  # change, so it's excluded rather than silently folded in.
   # Rehearsal env, not production - services get torn down/recreated
   # between sessions, so protection would just block that.
   deletion_protection = false
@@ -340,10 +360,10 @@ resource "google_cloud_run_v2_service" "placeholder" {
       egress = "ALL_TRAFFIC"
     }
     containers {
-      # Reset to the original placeholder for the timed live-build rehearsal
-      # - the build+push+deploy cycle itself is in scope to demonstrate live,
-      # per PLAN.md's Prep-scope rule. Env vars/VPC egress/startup probe stay
-      # as-is: that's infra wiring, not the live-build deliverable.
+      # Placeholder on purpose - the build+push+deploy cycle itself is in
+      # scope to demonstrate live, per PLAN.md's Prep-scope rule. Env
+      # vars/VPC egress/startup probe stay as-is: that's infra wiring, not
+      # the live-build deliverable.
       image = "us-docker.pkg.dev/cloudrun/container/hello"
       env {
         name  = "PROJECT_ID"
@@ -382,6 +402,10 @@ resource "google_cloud_run_v2_service" "placeholder" {
       }
     }
   }
+
+  lifecycle {
+    ignore_changes = [scaling]
+  }
 }
 
 resource "google_cloud_run_v2_service_iam_member" "placeholder_public" {
@@ -415,9 +439,20 @@ resource "google_cloud_run_v2_service" "game_engine" {
       max_instance_count = 1
     }
     containers {
-      # Same rehearsal reset as game-api's placeholder above.
+      # Same placeholder reasoning as game-api's above.
       image = "us-docker.pkg.dev/cloudrun/container/hello"
+      env {
+        name  = "PROJECT_ID"
+        value = var.project_id
+      }
     }
+  }
+
+  # Same service-level `scaling` drift and same reasoning as
+  # google_cloud_run_v2_service.placeholder above - not something this
+  # change should touch, so ignored rather than applied.
+  lifecycle {
+    ignore_changes = [scaling]
   }
 }
 
@@ -440,6 +475,15 @@ resource "google_compute_region_network_endpoint_group" "game_api_neg" {
     service = google_cloud_run_v2_service.placeholder.name
   }
 }
+
+# The PSC NEG + Apigee backend service (GLB-side half of the "GLB sits in
+# front of Apigee" hairpin) are deliberately NOT declared here - they're the
+# live-build deliverable, added fresh each rehearsal/interview by the
+# `apigee-proxy` agent, per PLAN.md's Prep-scope rule and the spec in
+# INFRA_CONTEXT.md's "Proxy bundle routing". See that agent's own comments
+# (`.claude/agents/apigee-proxy.md`) and the resource names it uses
+# (`google_compute_region_network_endpoint_group.apigee_psc_neg`,
+# `google_compute_backend_service.apigee`) for the exact shape to expect.
 
 resource "google_compute_security_policy" "waf" {
   project = var.project_id
@@ -529,10 +573,93 @@ resource "google_compute_backend_service" "game_api" {
   }
 }
 
+# Static frontend (app/frontend/index.html) - served via a backend bucket
+# fronted by the same GLB/domain/cert as the API, so /api and the page share
+# an origin and avoid CORS entirely. Bucket name is suffixed with a random
+# hex ID: GCS bucket names are globally unique (not scoped to this project),
+# and a prior /teardown cycle soft-deleted a bucket named
+# "${var.project_id}-frontend" with a 7-day retention window, so that exact
+# name isn't reusable right now - the suffix guarantees a collision-free
+# name on every rehearsal cycle.
+resource "random_id" "frontend_suffix" {
+  byte_length = 4
+}
+
+resource "google_storage_bucket" "frontend" {
+  project                     = var.project_id
+  name                        = "${var.project_id}-frontend-${random_id.frontend_suffix.hex}"
+  location                    = var.region
+  uniform_bucket_level_access = true
+  force_destroy               = true
+
+  website {
+    main_page_suffix = "index.html"
+  }
+}
+
+# Public read of this bucket's objects only - scoped to roles/storage.objectViewer
+# on this single static-assets bucket, nothing project-wide. This is the
+# standard way to serve a backend-bucket-fronted static site on a GLB; the
+# CLAUDE.md "never allow public database access" rule is about databases
+# specifically, not public static assets.
+resource "google_storage_bucket_iam_member" "frontend_public_read" {
+  bucket = google_storage_bucket.frontend.name
+  role   = "roles/storage.objectViewer"
+  member = "allUsers"
+}
+
+resource "google_storage_bucket_object" "frontend_index" {
+  name         = "index.html"
+  bucket       = google_storage_bucket.frontend.name
+  source       = "${path.module}/../app/frontend/index.html"
+  content_type = "text/html"
+}
+
+resource "google_compute_backend_bucket" "frontend" {
+  project     = var.project_id
+  name        = "frontend-backend"
+  bucket_name = google_storage_bucket.frontend.name
+  enable_cdn  = false
+}
+
 resource "google_compute_url_map" "game_api" {
-  project         = var.project_id
-  name            = "game-api-lb"
-  default_service = google_compute_backend_service.game_api.id
+  project = var.project_id
+  name    = "game-api-lb"
+
+  # Permanent baseline (prebuilt substrate, not live-build scope): frontend
+  # serves "/" and everything else, /api/* goes straight to game-api-backend.
+  # A prior rehearsal proved pointing default_service at the frontend bucket
+  # WITHOUT an explicit /api/ route_rule sends /api/* to GCS too (NoSuchKey
+  # 404) - a real regression - so this route_rule is required, not optional,
+  # for the frontend to be safe to leave wired in permanently.
+  #
+  # The live Apigee build session's job is to turn this into the hairpin
+  # split: change this route_rule's `service` from game_api_backend to the
+  # new apigee backend (PSC NEG-backed), and add a second, higher-priority-
+  # number route_rule for /_internal/api/* -> game_api_backend with a
+  # path_prefix_rewrite to /api/ (Apigee's proxy target calls back through
+  # that path, bypassing itself). See INFRA_CONTEXT.md "Proxy bundle
+  # routing" for the full spec - deliberately not built here, that's the
+  # live-build deliverable.
+  default_service = google_compute_backend_bucket.frontend.id
+
+  host_rule {
+    hosts        = [var.lb_domain]
+    path_matcher = "api-routing"
+  }
+
+  path_matcher {
+    name            = "api-routing"
+    default_service = google_compute_backend_bucket.frontend.id
+
+    route_rules {
+      priority = 1
+      service  = google_compute_backend_service.game_api.id
+      match_rules {
+        prefix_match = "/api/"
+      }
+    }
+  }
 }
 
 resource "google_compute_managed_ssl_certificate" "game_api" {
@@ -612,6 +739,13 @@ resource "google_identity_platform_config" "auth" {
       quota_duration = "3600s"
       start_time     = "2026-08-09T00:00:00Z"
     }
+  }
+
+  # Explicit, matching live state - without this, every plan showed drift
+  # wanting to null it out (provider ~> 6.0 always returns this block, even
+  # at its own default value, so an absent declaration reads as "remove it").
+  multi_tenant {
+    allow_tenants = false
   }
 
   depends_on = [google_project_service.identitytoolkit]

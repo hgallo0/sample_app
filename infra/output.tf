@@ -46,6 +46,11 @@ output "db_iam_user" {
   value       = "${data.google_project.current.number}-compute@developer"
 }
 
+output "frontend_bucket_name" {
+  description = "GCS bucket backing the static frontend (backend-bucket origin for the GLB's default_service)"
+  value       = google_storage_bucket.frontend.name
+}
+
 output "firebase_web_app_config" {
   description = "Firebase JS SDK config - apiKey/authDomain/projectId are not secrets, safe to embed client-side. Google sign-in still needs to be enabled manually in the Firebase Console before this is usable."
   value = {

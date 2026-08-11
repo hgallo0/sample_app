@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Rock Paper Scissors</title>
+<style>
+  body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 560px; margin: 48px auto; padding: 0 20px; color: #16202A; }
+  button { font-size: 15px; padding: 10px 18px; border-radius: 8px; border: 1px solid #7C8791; background: #fff; cursor: pointer; margin-right: 8px; }
+  button:hover:not(:disabled) { background: #f3f5f6; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .move-btn { font-size: 28px; padding: 16px 22px; }
+  pre { background: #f3f5f6; padding: 14px; border-radius: 8px; overflow-x: auto; font-size: 12.5px; white-space: pre-wrap; }
+  .row { margin: 20px 0; }
+  .ok { color: #157A73; font-weight: 600; }
+  .err { color: #b3261e; font-weight: 600; }
+  .result { font-size: 20px; font-weight: 650; margin: 12px 0; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.04em; color: #55636D; margin-bottom: 6px; }
+  ul { padding-left: 18px; font-size: 14px; margin-top: 4px; }
+  ol { padding-left: 18px; font-size: 14px; margin-top: 4px; }
+  .cols { display: flex; gap: 32px; flex-wrap: wrap; }
+  .cols > div { flex: 1; min-width: 200px; }
+</style>
+</head>
+<body>
+  <h1>Rock Paper Scissors</h1>
+
+  <div class="row" id="signinRow">
+    <button id="signin">Sign in with Google</button>
+    <span id="status"></span>
+  </div>
+
+  <div class="row" id="gameRow" style="display:none">
+    <button class="move-btn" data-move="rock">Rock</button>
+    <button class="move-btn" data-move="paper">Paper</button>
+    <button class="move-btn" data-move="scissors">Scissors</button>
+  </div>
+
+  <div class="result" id="result"></div>
+
+  <div class="cols">
+    <div class="row" id="historyRow" style="display:none">
+      <h2>Your history</h2>
+      <ul id="history"></ul>
+    </div>
+
+    <div class="row" id="leaderboardRow" style="display:none">
+      <h2>Leaderboard</h2>
+      <ol id="leaderboard"></ol>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+    import { getAuth, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+
+    // apiKey/authDomain/projectId/appId are not secrets - safe to embed
+    // client-side (Firebase web config, not an OAuth client secret). Values
+    // come from `tofu output firebase_web_app_config`.
+    const firebaseConfig = {
+      apiKey: "AIzaSyBcs4YXHex7sVsUQmLi-sWyoh-nf2uMv00",
+      authDomain: "backend-500517.firebaseapp.com",
+      projectId: "backend-500517",
+      appId: "1:923334354359:web:f7335bbf4f1c449471b432",
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const provider = new GoogleAuthProvider();
+    let token = null;
+
+    // Served from the same origin as /api/* via the load balancer's
+    // url_map, so these are same-origin fetches - no CORS config needed.
+    async function refreshHistory() {
+      const res = await fetch("/api/history", { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) return;
+      const games = await res.json();
+      const list = document.getElementById("history");
+      list.innerHTML = "";
+      for (const g of games) {
+        const li = document.createElement("li");
+        li.textContent = `${g.player_move} vs ${g.computer_move} → ${g.result}`;
+        list.appendChild(li);
+      }
+      document.getElementById("historyRow").style.display = games.length ? "block" : "none";
+    }
+
+    async function refreshLeaderboard() {
+      const res = await fetch("/api/leaderboard");
+      if (!res.ok) return;
+      const entries = await res.json();
+      const list = document.getElementById("leaderboard");
+      list.innerHTML = "";
+      for (const e of entries) {
+        const li = document.createElement("li");
+        li.textContent = `${e.user} — ${e.wins} win${e.wins === 1 ? "" : "s"}`;
+        list.appendChild(li);
+      }
+      document.getElementById("leaderboardRow").style.display = entries.length ? "block" : "none";
+    }
+
+    document.getElementById("signin").addEventListener("click", async () => {
+      const statusEl = document.getElementById("status");
+      statusEl.textContent = " signing in...";
+      try {
+        const cred = await signInWithPopup(auth, provider);
+        token = await cred.user.getIdToken();
+        statusEl.textContent = ` signed in as ${cred.user.email}`;
+        statusEl.className = "ok";
+        document.getElementById("gameRow").style.display = "block";
+        await refreshHistory();
+      } catch (err) {
+        statusEl.textContent = ` ${err.code || err.message}`;
+        statusEl.className = "err";
+      }
+    });
+
+    document.querySelectorAll(".move-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        document.querySelectorAll(".move-btn").forEach((b) => (b.disabled = true));
+        const resultEl = document.getElementById("result");
+        resultEl.textContent = "playing...";
+        try {
+          const res = await fetch("/api/move", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ move: btn.dataset.move }),
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+          const outcome = await res.json();
+          resultEl.textContent = `You: ${outcome.player_move} vs Computer: ${outcome.computer_move} → ${outcome.result.toUpperCase()}`;
+          await Promise.all([refreshHistory(), refreshLeaderboard()]);
+        } catch (err) {
+          document.getElementById("result").textContent = `error: ${err.message}`;
+        } finally {
+          document.querySelectorAll(".move-btn").forEach((b) => (b.disabled = false));
+        }
+      });
+    });
+
+    // Leaderboard is public (no auth required), show it on load.
+    refreshLeaderboard();
+  </script>
+</body>
+</html>
