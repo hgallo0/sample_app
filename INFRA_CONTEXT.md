@@ -113,7 +113,18 @@ untouched):
 | Instance | `eval-instance` (`us-central1`) |
 | Environment | `eval` |
 | Envgroup | `eval-group` |
-| Envgroup hostname | **`eval.example.com` — placeholder, does not match `rps.cloudwithgallo.com`.** Needs updating before the Apigee proxy can actually front `game-api` over the real domain — Apigee uses this for host-based routing internally to pick which environment's proxies to invoke, so it must match what the GLB forwards. Flagged as a known gap, not yet fixed. |
+| Envgroup hostname | **`eval.example.com` — placeholder, does not match `rps.cloudwithgallo.com`.** Needs updating before the Apigee proxy can actually front `game-api` over the real domain — Apigee uses this for host-based routing internally to pick which environment's proxies to invoke, so it must match what the GLB forwards. Flagged as a known gap, not yet fixed (this is reset back to the placeholder by `/teardown` between rehearsal cycles, so it reads "not yet fixed" here even after a rehearsal has fixed it live). |
+
+### `gcloud apigee` CLI gotchas (verified against the gcloud version installed here)
+
+The `apigee` command group is much narrower than it looks, and guessing subcommands by analogy with other `gcloud` groups burns real time hitting `Invalid choice` errors mid-task. Verified via `gcloud apigee --help` / `gcloud apigee <group> --help`:
+
+- **No `instances` group at all** — neither `gcloud apigee instances describe` nor `gcloud beta apigee instances ...` exist in this gcloud version. To read instance details (e.g. the PSC service attachment for `eval-instance`, needed to build a PSC NEG backend), call the Management API directly: `GET https://apigee.googleapis.com/v1/organizations/backend-500517/instances/eval-instance` with `gcloud auth print-access-token` as the bearer token.
+- **`gcloud apigee organizations` only supports `list`**, not `describe` — use `gcloud apigee organizations list` and filter, or hit the Management API directly for single-org detail.
+- **Deploying/undeploying a proxy bundle**: `gcloud apigee apis create`/`apis import` for a *new* bundle don't exist in this version either — import via the Management API (`POST .../apis?action=import&name=<api-name>`, multipart zip body), then the deploy/undeploy/list verbs below do work as real `gcloud` subcommands:
+  - `gcloud apigee apis deploy --organization=backend-500517 --environment=eval --api=<name> <revision>`
+  - `gcloud apigee apis undeploy --organization=backend-500517 --environment=eval --api=<name>`
+  - `gcloud apigee deployments list --organization=backend-500517 --environment=eval` — lists what's actually live in an environment right now; check this before deploying a new proxy to the same base path, a stale prior-rehearsal deployment here causes `CONFLICTING_DEPLOYMENT` (see `/teardown` step 3, added after this cost real time mid-rehearsal).
 
 ### Proxy bundle routing (spec'd, not yet built)
 
