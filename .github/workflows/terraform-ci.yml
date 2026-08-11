@@ -1,0 +1,49 @@
+name: Terraform CI
+
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/terraform-ci.yml"
+
+jobs:
+  tofu:
+    name: tofu fmt & validate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: "1.11.1"
+
+      - name: tofu fmt (check only)
+        run: tofu fmt -check -recursive
+
+      # -backend=false: validate doesn't need remote state or GCP
+      # credentials, just the config/provider schemas.
+      - name: tofu init
+        run: tofu init -backend=false
+
+      - name: tofu validate
+        run: tofu validate
+
+  secret-scan:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    # gitleaks-action calls the GitHub API to list the PR's commits - the
+    # default GITHUB_TOKEN has no repo access unless granted explicitly.
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

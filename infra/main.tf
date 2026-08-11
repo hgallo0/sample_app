@@ -1,81 +1,26 @@
-terraform {
-  required_providers {
-    google = {
-      source  = "hashicorp/google"
-      version = "~> 6.0"
-    }
-    google-beta = {
-      source  = "hashicorp/google-beta"
-      version = "~> 6.0"
-    }
-    random = {
-      source  = "hashicorp/random"
-      version = "~> 3.6"
-    }
-  }
-}
+module "base_infra" {
+  source     = "./modules/base-infra"
+  project_id = var.project_id
+  region     = var.region
+  services = [
+    "apigee.googleapis.com",
+    "servicenetworking.googleapis.com",
+    "redis.googleapis.com",
+    "dns.googleapis.com",
+    "artifactregistry.googleapis.com",
+    "secretmanager.googleapis.com",
+    "identitytoolkit.googleapis.com",
+    "cloudresourcemanager.googleapis.com",
+  ]
 
-provider "google" {
-  project               = var.project_id
-  region                = var.region
-  user_project_override = true
-  billing_project       = var.project_id
-}
+  psa_apigee_range_name = "apigee-psa-range"
+  psa_data_range_name   = "data-psa-range"
 
-# google_firebase_web_app is beta-only as of provider 6.x.
-provider "google-beta" {
-  project               = var.project_id
-  region                = var.region
-  user_project_override = true
-  billing_project       = var.project_id
-}
+  postgres_instance_name           = "rps-postgres"
+  postgres_database_name           = "rps"
+  postgres_root_password_secret_id = "postgres-root-password"
 
-resource "google_project_service" "apigee" {
-  project            = var.project_id
-  service            = "apigee.googleapis.com"
-  disable_on_destroy = false
-}
-
-resource "google_project_service" "service_networking" {
-  project            = var.project_id
-  service            = "servicenetworking.googleapis.com"
-  disable_on_destroy = false
-}
-
-resource "google_project_service" "redis" {
-  project            = var.project_id
-  service            = "redis.googleapis.com"
-  disable_on_destroy = false
-}
-
-resource "google_project_service" "dns" {
-  project            = var.project_id
-  service            = "dns.googleapis.com"
-  disable_on_destroy = false
-}
-
-resource "google_project_service" "artifactregistry" {
-  project            = var.project_id
-  service            = "artifactregistry.googleapis.com"
-  disable_on_destroy = false
-}
-
-resource "google_project_service" "secretmanager" {
-  project            = var.project_id
-  service            = "secretmanager.googleapis.com"
-  disable_on_destroy = false
-}
-
-resource "google_project_service" "identitytoolkit" {
-  project            = var.project_id
-  service            = "identitytoolkit.googleapis.com"
-  disable_on_destroy = false
-}
-
-resource "google_project_service" "cloudresourcemanager" {
-  project            = var.project_id
-  service            = "cloudresourcemanager.googleapis.com"
-  disable_on_destroy = false
+  redis_instance_name = "rps-leaderboard-cache"
 }
 
 data "google_project" "current" {
@@ -119,40 +64,6 @@ resource "google_compute_router_nat" "default" {
   source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
 }
 
-# Private Services Access: reserves an internal IP range and hands it to
-# Google's service producer network so managed services (Apigee's runtime
-# plane here) get a private address inside our VPC.
-resource "google_compute_global_address" "apigee_psa_range" {
-  project       = var.project_id
-  name          = "apigee-psa-range"
-  purpose       = "VPC_PEERING"
-  address_type  = "INTERNAL"
-  prefix_length = 16
-  network       = data.google_compute_network.default.id
-
-  depends_on = [google_project_service.service_networking]
-}
-
-resource "google_compute_global_address" "data_psa_range" {
-  project       = var.project_id
-  name          = "data-psa-range"
-  purpose       = "VPC_PEERING"
-  address_type  = "INTERNAL"
-  prefix_length = 20
-  network       = data.google_compute_network.default.id
-
-  depends_on = [google_project_service.service_networking]
-}
-
-resource "google_service_networking_connection" "psa_connection" {
-  network = data.google_compute_network.default.id
-  service = "servicenetworking.googleapis.com"
-  reserved_peering_ranges = [
-    google_compute_global_address.apigee_psa_range.name,
-    google_compute_global_address.data_psa_range.name,
-  ]
-}
-
 resource "google_apigee_organization" "org" {
   project_id         = var.project_id
   analytics_region   = var.apigee_analytics_region
@@ -161,7 +72,10 @@ resource "google_apigee_organization" "org" {
   authorized_network = data.google_compute_network.default.id
   description        = "Savvy interview mock build - Apigee eval org"
 
-  depends_on = [google_service_networking_connection.psa_connection]
+  # PSA ranges + service networking connection now live in the base-infra
+  # module alongside Postgres/Redis, which also need them - see
+  # modules/base-infra/main.tf.
+  depends_on = [module.base_infra]
 }
 
 resource "google_apigee_instance" "eval_instance" {
@@ -194,100 +108,6 @@ resource "google_apigee_envgroup_attachment" "eval_envgroup_attachment" {
   environment = google_apigee_environment.eval_env.name
 }
 
-# Smallest/cheapest tier, no HA, no backups - this is interview-prep infra,
-# not production. Tear down after the interview; it bills hourly whether
-# idle or not.
-resource "google_sql_database_instance" "postgres" {
-  project             = var.project_id
-  name                = "rps-postgres"
-  region              = var.region
-  database_version    = "POSTGRES_16"
-  deletion_protection = false
-
-  settings {
-    edition           = "ENTERPRISE"
-    tier              = "db-f1-micro"
-    availability_type = "ZONAL"
-
-    ip_configuration {
-      ipv4_enabled    = false
-      private_network = data.google_compute_network.default.id
-    }
-
-    backup_configuration {
-      enabled = false
-    }
-
-    # IAM DB auth, not a password - game-api's runtime service account
-    # authenticates as itself (short-lived OAuth token), no static
-    # credential to store, rotate, or leak, ever.
-    database_flags {
-      name  = "cloudsql.iam_authentication"
-      value = "on"
-    }
-  }
-
-  depends_on = [google_service_networking_connection.psa_connection]
-}
-
-resource "google_sql_database" "rps" {
-  name     = "rps"
-  instance = google_sql_database_instance.postgres.name
-}
-
-# Container only, no version - the postgres built-in admin user's password
-# is set out-of-band via `gcloud sql users set-password` and the value is
-# added here manually via `gcloud secrets versions add`, never through Tofu.
-resource "google_secret_manager_secret" "postgres_root_password" {
-  project   = var.project_id
-  secret_id = "postgres-root-password"
-
-  replication {
-    auto {}
-  }
-
-  depends_on = [google_project_service.secretmanager]
-}
-
-# IAM database user for game-api's runtime identity - no password field at
-# all, nothing to leak into state. Cloud SQL requires the service account
-# email with ".gserviceaccount.com" stripped here.
-resource "google_sql_user" "game_api_iam" {
-  name     = "${data.google_project.current.number}-compute@developer"
-  instance = google_sql_database_instance.postgres.name
-  type     = "CLOUD_IAM_SERVICE_ACCOUNT"
-}
-
-# Required in addition to the IAM DB user above - grants the identity
-# permission to authenticate to Cloud SQL via IAM at all.
-resource "google_project_iam_member" "game_api_cloudsql_instance_user" {
-  project = var.project_id
-  role    = "roles/cloudsql.instanceUser"
-  member  = "serviceAccount:${data.google_project.current.number}-compute@developer.gserviceaccount.com"
-}
-
-resource "google_project_iam_member" "game_api_cloudsql_client" {
-  project = var.project_id
-  role    = "roles/cloudsql.client"
-  member  = "serviceAccount:${data.google_project.current.number}-compute@developer.gserviceaccount.com"
-}
-
-
-# BASIC tier (no HA replica), 1GB - cheapest option, same reasoning as above.
-resource "google_redis_instance" "leaderboard_cache" {
-  project            = var.project_id
-  name               = "rps-leaderboard-cache"
-  region             = var.region
-  tier               = "BASIC"
-  memory_size_gb     = 1
-  authorized_network = data.google_compute_network.default.id
-  connect_mode       = "PRIVATE_SERVICE_ACCESS"
-
-  depends_on = [
-    google_service_networking_connection.psa_connection,
-    google_project_service.redis,
-  ]
-}
 
 # Holds both game-api and game-engine images. Created via Tofu even though
 # it's fast/live-session-friendly infra - GCP resources are never created
@@ -299,7 +119,7 @@ resource "google_artifact_registry_repository" "rps_images" {
   format        = "DOCKER"
   description   = "RPS game images (game-api, game-engine)"
 
-  depends_on = [google_project_service.artifactregistry]
+  depends_on = [module.base_infra]
 }
 
 # Placeholder backend so the LB + managed cert (the slow part) can
@@ -379,7 +199,7 @@ resource "google_cloud_run_v2_service" "placeholder" {
       }
       env {
         name  = "REDIS_HOST"
-        value = google_redis_instance.leaderboard_cache.host
+        value = module.base_infra.redis_host
       }
       env {
         name  = "GAME_ENGINE_URL"
@@ -485,74 +305,52 @@ resource "google_compute_region_network_endpoint_group" "game_api_neg" {
 # (`google_compute_region_network_endpoint_group.apigee_psc_neg`,
 # `google_compute_backend_service.apigee`) for the exact shape to expect.
 
-resource "google_compute_security_policy" "waf" {
-  project = var.project_id
-  name    = "rps-waf"
+# Without json_parsing = STANDARD, Cloud Armor inspects request bodies as
+# opaque strings, so any JSON object/array's {}/[] structure trips the
+# SQLi/XSS preconfigured rules as a false positive - every JSON POST body
+# gets blocked outright. STANDARD parses Content-Type: application/json
+# bodies properly and inspects field values individually instead, preserving
+# real protection.
+module "security" {
+  source     = "./modules/security"
+  project_id = var.project_id
+  name       = "rps-waf"
 
-  # Without this, Cloud Armor inspects request bodies as opaque strings, so
-  # any JSON object/array's {}/[] structure trips the SQLi/XSS preconfigured
-  # rules as a false positive - every JSON POST body gets blocked outright.
-  # STANDARD parses Content-Type: application/json bodies properly and
-  # inspects field values individually instead, preserving real protection.
-  advanced_options_config {
-    json_parsing = "STANDARD"
-    log_level    = "VERBOSE"
-  }
-
-  rule {
-    action   = "deny(403)"
-    priority = 1000
-    match {
-      expr {
-        expression = "evaluatePreconfiguredExpr('xss-stable')"
+  rules = [
+    {
+      action                   = "deny(403)"
+      priority                 = 1000
+      description              = "Block XSS"
+      preconfigured_expression = "xss-stable"
+    },
+    {
+      action                   = "deny(403)"
+      priority                 = 1001
+      description              = "Block SQL injection"
+      preconfigured_expression = "sqli-stable"
+    },
+    {
+      action        = "throttle"
+      priority      = 2000
+      description   = "Rate limit per source IP"
+      src_ip_ranges = ["*"]
+      rate_limit_options = {
+        conform_action = "allow"
+        exceed_action  = "deny(429)"
+        enforce_on_key = "IP"
+        rate_limit_threshold = {
+          count        = 100
+          interval_sec = 60
+        }
       }
-    }
-    description = "Block XSS"
-  }
-
-  rule {
-    action   = "deny(403)"
-    priority = 1001
-    match {
-      expr {
-        expression = "evaluatePreconfiguredExpr('sqli-stable')"
-      }
-    }
-    description = "Block SQL injection"
-  }
-
-  rule {
-    action   = "throttle"
-    priority = 2000
-    match {
-      versioned_expr = "SRC_IPS_V1"
-      config {
-        src_ip_ranges = ["*"]
-      }
-    }
-    rate_limit_options {
-      conform_action = "allow"
-      exceed_action  = "deny(429)"
-      enforce_on_key = "IP"
-      rate_limit_threshold {
-        count        = 100
-        interval_sec = 60
-      }
-    }
-    description = "Rate limit per source IP"
-  }
-
-  rule {
-    action   = "allow"
-    priority = 2147483647
-    match {
-      versioned_expr = "SRC_IPS_V1"
-      config {
-        src_ip_ranges = ["*"]
-      }
-    }
-    description = "Default allow"
-  }
+    },
+    {
+      action        = "allow"
+      priority      = 2147483647
+      description   = "Default allow"
+      src_ip_ranges = ["*"]
+    },
+  ]
 }
 
 resource "google_compute_backend_service" "game_api" {
@@ -560,7 +358,7 @@ resource "google_compute_backend_service" "game_api" {
   name                  = "game-api-backend"
   protocol              = "HTTPS"
   load_balancing_scheme = "EXTERNAL_MANAGED"
-  security_policy       = google_compute_security_policy.waf.id
+  security_policy       = module.security.id
 
   # Was off entirely - the WAF false-positive on JSON bodies (see the
   # security policy above) was undiagnosable without this.
@@ -583,6 +381,18 @@ resource "google_compute_backend_service" "game_api" {
 # name on every rehearsal cycle.
 resource "random_id" "frontend_suffix" {
   byte_length = 4
+}
+
+resource "google_storage_bucket" "tfstate" {
+  project                     = var.project_id
+  name                        = "${var.project_id}-tfstate"
+  location                    = var.region
+  uniform_bucket_level_access = true
+  force_destroy               = false
+
+  versioning {
+    enabled = true
+  }
 }
 
 resource "google_storage_bucket" "frontend" {
@@ -701,7 +511,7 @@ resource "google_dns_managed_zone" "rps" {
   dns_name    = "${var.lb_domain}."
   description = "Delegated subdomain zone for the RPS game API load balancer"
 
-  depends_on = [google_project_service.dns]
+  depends_on = [module.base_infra]
 }
 
 resource "google_dns_record_set" "rps_a" {
@@ -748,7 +558,7 @@ resource "google_identity_platform_config" "auth" {
     allow_tenants = false
   }
 
-  depends_on = [google_project_service.identitytoolkit]
+  depends_on = [module.base_infra]
 }
 
 # Registers a Firebase "Web App" purely to get an apiKey/authDomain pair for
