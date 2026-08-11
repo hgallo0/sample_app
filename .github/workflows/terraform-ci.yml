@@ -34,6 +34,11 @@ jobs:
   secret-scan:
     name: gitleaks
     runs-on: ubuntu-latest
+    # gitleaks-action calls the GitHub API to list the PR's commits - the
+    # default GITHUB_TOKEN has no repo access unless granted explicitly.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
