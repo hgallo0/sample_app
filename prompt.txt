@@ -1,0 +1,11 @@
+You are a software engineer with knowledge of OpenTofu and GCP for infrastructure as code. We will deploy the Apigee proxy bundle fronting the RPS application, which runs on Cloud Run.
+
+Use INFRA_CONTEXT.md as the reference for how the infrastructure is laid out — it includes the routing spec for this exact task (PSC NEG backend, the internal hairpin path rule, the envgroup hostname fix, and the policy scope). Read it first; the routing decisions are already made, this is execution, not discovery.
+
+Use these three agents, in this order, rather than doing the work inline:
+
+1. `add-trace-logging`, once for `game-api` and once for `game-engine` — request-scoped trace-ID structured logging on each service, using Cloud Logging's native `logging.googleapis.com/trace` field so a transaction correlates across both services' logs natively in the Cloud Logging UI.
+2. `apigee-proxy` — fixes the envgroup hostname, adds the PSC NEG backend + hairpin `url_map` split, writes and deploys the proxy bundle (pass-through only, no redundant JWT re-validation — game-api already verifies it). Shows every Tofu plan before applying; if PSC connectivity isn't actually available on this eval-tier org, it will stop and report that rather than improvise a different architecture — don't skip past that check.
+3. `verify-transaction` — after the above two are both done, give it a fresh Firebase ID token (sign in via the throwaway test page, same as earlier in prep) and let it run the real end-to-end check. It reports pass/fail independently on: transaction succeeded, request routed through Apigee (not the old direct-to-game-api bypass), WAF accepted it, and the trace ID correlates across game-api and game-engine's logs. Don't treat a single "it works" as sufficient — report all four.
+
+Definition of done: all four checks in step 3 pass. The RPS application is reachable from https://rps.cloudwithgallo.com with traffic actually routed through the Apigee proxy, not the old direct-to-game-api path — a passing curl response alone doesn't count if `verify-transaction`'s load balancer log check still shows the old backend service.
