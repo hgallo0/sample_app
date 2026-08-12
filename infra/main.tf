@@ -11,6 +11,7 @@ module "base_infra" {
     "secretmanager.googleapis.com",
     "identitytoolkit.googleapis.com",
     "cloudresourcemanager.googleapis.com",
+    "cloudtrace.googleapis.com",
   ]
 
   psa_apigee_range_name = "apigee-psa-range"
@@ -284,6 +285,15 @@ resource "google_cloud_run_v2_service_iam_member" "game_engine_invoker" {
   # game-api's own runtime identity - same default compute SA both services
   # run as. Not allUsers: this service has no public path at all.
   member = "serviceAccount:${data.google_project.current.number}-compute@developer.gserviceaccount.com"
+}
+
+# Lets both services' OTel exporters (game-api and game-engine both run as
+# this same default compute SA) write spans to Cloud Trace - without it the
+# CloudTraceSpanExporter/otlp exporter fails silently on every export.
+resource "google_project_iam_member" "compute_sa_cloudtrace_agent" {
+  project = var.project_id
+  role    = "roles/cloudtrace.agent"
+  member  = "serviceAccount:${data.google_project.current.number}-compute@developer.gserviceaccount.com"
 }
 
 resource "google_compute_region_network_endpoint_group" "game_api_neg" {
