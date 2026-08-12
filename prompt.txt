@@ -2,13 +2,16 @@ You are a software engineer with knowledge of OpenTofu and GCP for infrastructur
 
 Use INFRA_CONTEXT.md as the reference for how the infrastructure is laid out — it includes the routing spec for this exact task (PSC NEG backend, the internal hairpin path rule, the envgroup hostname fix, and the policy scope). Read it first; the routing decisions are already made, this is execution, not discovery.
 
-You will need a token for testing purposes, use this token wich will expire in 1 hour 
+You will need a token for testing purposes, use this token which will expire in 1 hour:
+[place holder for token which you can get from   http://localhost:8743/sso-test.html]
 
 Frontend is prebuilt substrate now (bucket + static page + url_map wiring), not a live-build step - it's already live at "/" and doesn't need touching. Use these agents, in this order, rather than doing the work inline:
 
 1. `add-trace-logging`, once for `game-api` and once for `game-engine` — request-scoped trace-ID structured logging on each service, using Cloud Logging's native `logging.googleapis.com/trace` field so a transaction correlates across both services' logs natively in the Cloud Logging UI. Dispatch both in parallel, they're independent.
-2. Build and push new images for both services (in parallel - two independent Docker builds), then `deploy cloud run` to roll them out.
+2. Build and push new images for both services (in parallel - two independent Docker builds), then `deploy-cloud-run`, once for `game-api` and once for `game-engine` — it takes one service + image URI per run, so it needs two separate invocations, same as step 1.
 3. `apigee-proxy` — fixes the envgroup hostname, adds the PSC NEG backend + hairpin `url_map` split, writes and deploys the proxy bundle (pass-through only, no redundant JWT re-validation — game-api already verifies it). Shows every Tofu plan before applying; if PSC connectivity isn't actually available on this eval-tier org, it will stop and report that rather than improvise a different architecture — don't skip past that check.
 4. `verify-transaction` — after the above are done, give it a fresh Firebase ID token (sign in via the throwaway test page, same as earlier in prep) and let it run the real end-to-end check. It reports pass/fail independently on: transaction succeeded, request routed through Apigee (not the old direct-to-game-api bypass), WAF accepted it, and the trace ID correlates across game-api and game-engine's logs. Don't treat a single "it works" as sufficient — report all four.
 
 Definition of done: all four checks in step 4 pass. The RPS application is reachable from https://rps.cloudwithgallo.com with traffic actually routed through the Apigee proxy, not the old direct-to-game-api path — a passing curl response alone doesn't count if `verify-transaction`'s load balancer log check still shows the old backend service.
+
+Don't ask for confirmation on routine reads/plans (`tofu plan`, `gcloud describe/list`, etc. - these are already allowlisted, see `.claude/settings.json`). `deploy-cloud-run` and `apigee-proxy` will each still stop and show their `tofu apply` plan before applying, by design - that's not a pause to route around, it's the trust boundary for real infra changes; get a direct go-ahead at each stop rather than trying to pre-authorize it here.

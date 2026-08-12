@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tofu plan *)",
+      "Bash(gcloud logging read *)",
+      "Bash(gcloud run services describe *)",
+      "Bash(gcloud run services list *)",
+      "Bash(tofu fmt -check *)",
+      "Bash(tofu validate *)",
+      "Bash(git fetch origin *)",
+      "Bash(gcloud artifacts docker images list *)",
+      "Bash(gcloud artifacts docker images describe *)",
+      "Bash(gcloud artifacts docker tags list *)",
+      "Bash(gcloud services list *)",
+      "Bash(gcloud artifacts repositories describe *)",
+      "Bash(gcloud apigee organizations list*)",
+      "Bash(gcloud secrets versions list *)",
+      "Bash(gcloud storage ls *)",
+      "Bash(gcloud compute networks list *)",
+      "Bash(gcloud compute networks subnets list *)",
+      "Bash(gcloud apigee apis list*)",
+      "Bash(gcloud config get-value *)",
+      "Bash(gcloud auth print-access-token*)",
+      "Bash(gcloud auth application-default print-access-token*)"
+    ]
+  }
+}
