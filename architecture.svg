@@ -1,0 +1,275 @@
+<svg viewBox="0 0 1320 1440" width="1320" height="1440" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Topology diagram of the RPS application on GCP project backend-500517: browser reaches the global HTTPS load balancer at 34.160.17.87:443, which fans out to a GCS-backed frontend, an Apigee proxy behind a PSC NEG backend, and a direct hairpin path to game-api. Apigee's proxy target calls back through the same load balancer's internal-only path rule. Inside the default VPC, game-api on Cloud Run calls game-engine over HTTPS with an OIDC token and trace headers, and both reach Cloud SQL Postgres and Redis on private IPs, egressing public API calls through Cloud NAT. Identity Platform verification and OpenTelemetry/Cloud Trace calls run alongside as control-plane hops.">
+  <title>RPS application — infrastructure topology (backend-500517, us-central1)</title>
+  <style>
+    :root {
+      --bg: #F3F5F8;
+      --surface: #FFFFFF;
+      --surface-2: #E7EAEF;
+      --ink: #171B21;
+      --ink-muted: #5B6472;
+      --ink-faint: #8891A0;
+      --line: #C7CCD5;
+      --line-strong: #9AA2AF;
+      --accent-public: #B8622E;
+      --accent-public-soft: #F3E3D6;
+      --accent-private: #1B7A6C;
+      --accent-control: #5B57A8;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #12151A;
+        --surface: #1A1F26;
+        --surface-2: #232933;
+        --ink: #E9EBEF;
+        --ink-muted: #9AA3B2;
+        --ink-faint: #6B7484;
+        --line: #333B47;
+        --line-strong: #4A5361;
+        --accent-public: #E2915C;
+        --accent-public-soft: #3A2C22;
+        --accent-private: #4FBFAC;
+        --accent-control: #9B95E0;
+      }
+    }
+    svg { background: var(--bg); font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+    .zone-rect { fill: none; stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 5 4; }
+    .zone-label {
+      font-family: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace;
+      font-size: 15px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; fill: var(--ink-faint);
+    }
+    .node-rect { fill: var(--surface-2); stroke: var(--line-strong); stroke-width: 1.3; }
+    .node-rect.accent-public { stroke: var(--accent-public); }
+    .node-rect.accent-private { stroke: var(--accent-private); }
+    .node-rect.accent-control { stroke: var(--accent-control); }
+    .node-title { font-size: 15.5px; font-weight: 700; fill: var(--ink); }
+    .node-sub {
+      font-family: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace;
+      font-size: 12.5px; fill: var(--ink-muted);
+    }
+    .node-tag {
+      font-family: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace;
+      font-size: 11px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;
+    }
+    .tag-public { fill: var(--accent-public); }
+    .tag-private { fill: var(--accent-private); }
+    .tag-control { fill: var(--accent-control); }
+    .edge-public { stroke: var(--accent-public); }
+    .edge-private { stroke: var(--accent-private); }
+    .edge-control { stroke: var(--accent-control); stroke-dasharray: 6 5; }
+    .edge-neutral { stroke: var(--line-strong); }
+    .edge { fill: none; stroke-width: 2; }
+    .edge-label {
+      font-family: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace;
+      font-size: 12px; fill: var(--ink-muted);
+    }
+    .edge-label-strong { font-weight: 700; }
+    .label-bg { fill: var(--bg); }
+    .marker-fill-public { fill: var(--accent-public); }
+    .marker-fill-private { fill: var(--accent-private); }
+    .marker-fill-control { fill: var(--accent-control); }
+    .marker-fill-neutral { fill: var(--line-strong); }
+    .note-text {
+      font-family: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace;
+      font-size: 12px; fill: var(--ink-faint);
+    }
+    .badge-rect { fill: var(--accent-public-soft); stroke: var(--accent-public); stroke-width: 1.2; }
+  </style>
+  <rect x="0" y="0" width="1320" height="1440" fill="var(--bg)"/>
+  <defs>
+    <marker id="arrPublic" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="marker-fill-public" d="M0,0 L10,5 L0,10 Z" />
+    </marker>
+    <marker id="arrPrivate" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="marker-fill-private" d="M0,0 L10,5 L0,10 Z" />
+    </marker>
+    <marker id="arrControl" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="marker-fill-control" d="M0,0 L10,5 L0,10 Z" />
+    </marker>
+    <marker id="arrNeutral" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path class="marker-fill-neutral" d="M0,0 L10,5 L0,10 Z" />
+    </marker>
+  </defs>
+
+  <!-- ============ ROW 1: Client / DNS / Identity ============ -->
+  <rect x="20" y="34" width="200" height="66" class="node-rect" rx="8"/>
+  <text x="40" y="58" class="node-title">Cloud DNS</text>
+  <text x="40" y="76" class="node-sub">rps-zone</text>
+  <text x="40" y="92" class="node-sub">A → 34.160.17.87 (TTL 300)</text>
+
+  <rect x="300" y="18" width="340" height="82" class="node-rect accent-public" rx="8"/>
+  <text x="320" y="44" class="node-title">Browser</text>
+  <text x="320" y="63" class="node-sub">sso-test.html client</text>
+  <text x="320" y="80" class="node-sub">Firebase JS SDK (Google Sign-In)</text>
+
+  <rect x="980" y="18" width="320" height="82" class="node-rect accent-control" rx="8"/>
+  <text x="1000" y="44" class="node-title">Identity Platform</text>
+  <text x="1000" y="63" class="node-sub">identitytoolkit.googleapis.com</text>
+  <text x="1000" y="80" class="node-sub">Google Sign-In provider</text>
+
+  <line x1="220" y1="67" x2="298" y2="67" class="edge edge-neutral" marker-end="url(#arrNeutral)"/>
+  <text x="228" y="61" class="edge-label">resolves</text>
+
+  <line x1="640" y1="59" x2="978" y2="59" class="edge edge-control" marker-end="url(#arrControl)" marker-start="url(#arrControl)"/>
+  <rect x="740" y="42" width="180" height="18" class="label-bg"/>
+  <text x="748" y="55" class="edge-label">OAuth :443 HTTPS (browser-direct)</text>
+
+  <line x1="470" y1="100" x2="470" y2="152" class="edge edge-public" marker-end="url(#arrPublic)"/>
+  <rect x="480" y="112" width="270" height="18" class="label-bg"/>
+  <text x="484" y="125" class="edge-label edge-label-strong">HTTPS :443 · TLS (game-api-cert)</text>
+
+  <!-- ============ ROW 2: Edge zone ============ -->
+  <rect x="260" y="152" width="800" height="200" class="zone-rect" rx="10"/>
+  <text x="278" y="176" class="zone-label">Edge — global external HTTPS load balancer</text>
+
+  <rect x="300" y="192" width="340" height="130" class="node-rect" rx="8"/>
+  <text x="320" y="216" class="node-title">game-api-lb</text>
+  <text x="320" y="235" class="node-sub">fwd rule game-api-https-rule</text>
+  <text x="320" y="252" class="node-sub">proxy game-api-https-proxy</text>
+  <text x="320" y="269" class="node-sub">cert game-api-cert (ACTIVE)</text>
+  <text x="320" y="290" class="node-sub" style="font-weight:700">34.160.17.87 : 443</text>
+
+  <rect x="680" y="192" width="340" height="130" class="badge-rect"/>
+  <text x="700" y="216" class="node-title">Cloud Armor — rps-waf</text>
+  <text x="700" y="235" class="node-sub">xss-stable + sqli-stable → deny(403)</text>
+  <text x="700" y="252" class="node-sub">rate limit 100 req/60s/IP → 429</text>
+  <text x="700" y="269" class="node-sub">json_parsing = STANDARD</text>
+  <text x="700" y="288" class="node-sub">attached: apigee-backend, game-api-backend</text>
+
+  <!-- ============ ROW 3: URL map fan-out ============ -->
+  <text x="278" y="378" class="note-text">url_map game-api-lb · path matcher api-routing</text>
+
+  <rect x="260" y="392" width="240" height="94" class="node-rect" rx="8"/>
+  <text x="280" y="416" class="node-title">frontend-backend</text>
+  <text x="280" y="435" class="node-sub">backend bucket</text>
+  <text x="280" y="452" class="node-sub">GCS static site (public-read)</text>
+  <text x="280" y="470" class="node-tag tag-public">path: /</text>
+
+  <rect x="540" y="392" width="240" height="94" class="node-rect accent-control" rx="8"/>
+  <text x="560" y="416" class="node-title">apigee-backend</text>
+  <text x="560" y="435" class="node-sub">HTTPS · timeout 120s</text>
+  <text x="560" y="452" class="node-sub">via PSC NEG</text>
+  <text x="560" y="470" class="node-tag tag-control">path: /api/* (prio 1)</text>
+
+  <rect x="820" y="392" width="240" height="94" class="node-rect accent-private" rx="8"/>
+  <text x="840" y="416" class="node-title">game-api-backend</text>
+  <text x="840" y="435" class="node-sub">HTTPS · timeout 120s</text>
+  <text x="840" y="452" class="node-sub">rewrite → /api/</text>
+  <text x="840" y="470" class="node-tag tag-private">path: /_internal/api/* (prio 2)</text>
+
+  <line x1="420" y1="352" x2="380" y2="390" class="edge edge-neutral" marker-end="url(#arrNeutral)"/>
+  <line x1="600" y1="352" x2="660" y2="390" class="edge edge-control" marker-end="url(#arrControl)"/>
+  <line x1="780" y1="352" x2="940" y2="390" class="edge edge-private" marker-end="url(#arrPrivate)"/>
+
+  <!-- ============ ROW 4: Apigee zone ============ -->
+  <rect x="500" y="530" width="560" height="230" class="zone-rect" rx="10"/>
+  <text x="518" y="554" class="zone-label">Apigee — org backend-500517 · env eval</text>
+
+  <line x1="660" y1="486" x2="660" y2="528" class="edge edge-control" marker-end="url(#arrControl)"/>
+
+  <rect x="540" y="570" width="240" height="100" class="node-rect accent-control" rx="8"/>
+  <text x="560" y="594" class="node-title">apigee-psc-neg</text>
+  <text x="560" y="613" class="node-sub">PRIVATE_SERVICE_CONNECT</text>
+  <text x="560" y="630" class="node-sub">→ eval-instance service</text>
+  <text x="560" y="647" class="node-sub">attachment (us-central1)</text>
+
+  <rect x="800" y="570" width="240" height="100" class="node-rect accent-control" rx="8"/>
+  <text x="820" y="594" class="node-title">game-api-proxy rev 3</text>
+  <text x="820" y="613" class="node-sub">basepath /api</text>
+  <text x="820" y="630" class="node-sub">Spike-Arrest 30 ps</text>
+  <text x="820" y="647" class="node-sub">Quota 1000/hr per Auth header</text>
+
+  <line x1="780" y1="620" x2="798" y2="620" class="edge edge-control" marker-end="url(#arrControl)"/>
+
+  <rect x="540" y="690" width="500" height="52" class="node-rect" rx="8"/>
+  <text x="558" y="712" class="node-sub" style="font-weight:700">envgroup eval-group · hostname rps.cloudwithgallo.com</text>
+  <text x="558" y="730" class="node-sub">TargetEndpoint forwards Authorization header unchanged</text>
+
+  <!-- Hairpin: Apigee target -> back through LB (priority-2 rule) -->
+  <path d="M 1040 700 C 1180 700, 1180 430, 1062 430" class="edge edge-control" marker-end="url(#arrControl)" fill="none"/>
+  <rect x="1050" y="540" width="230" height="52" class="label-bg" rx="4"/>
+  <text x="1058" y="558" class="edge-label edge-label-strong">hairpin target:</text>
+  <text x="1058" y="575" class="edge-label">https://rps.cloudwithgallo.com</text>
+  <text x="1058" y="589" class="edge-label">/_internal/api{suffix} :443</text>
+
+  <!-- ============ ROW 5: VPC zone ============ -->
+  <rect x="260" y="850" width="800" height="440" class="zone-rect" rx="10"/>
+  <text x="278" y="874" class="zone-label">VPC default — 10.128.0.0/20 (us-central1)</text>
+
+  <line x1="940" y1="486" x2="940" y2="848" class="edge edge-private" marker-end="url(#arrPrivate)"/>
+  <rect x="948" y="650" width="120" height="18" class="label-bg"/>
+  <text x="952" y="663" class="edge-label">HTTPS :443</text>
+
+  <rect x="300" y="900" width="330" height="150" class="node-rect accent-private" rx="8"/>
+  <text x="320" y="925" class="node-title">game-api</text>
+  <text x="320" y="944" class="node-sub">Cloud Run · container :8080 HTTP</text>
+  <text x="320" y="961" class="node-sub">ingress: INTERNAL_LOAD_BALANCER</text>
+  <text x="320" y="978" class="node-sub">Direct VPC egress: ALL_TRAFFIC</text>
+  <text x="320" y="995" class="node-sub">SA: …-compute@developer · min0/max1</text>
+  <text x="320" y="1012" class="node-sub">probe tcp:8080, failure_threshold=3</text>
+  <text x="320" y="1029" class="node-sub">structured JSON logs + OTel spans</text>
+
+  <rect x="690" y="900" width="330" height="150" class="node-rect accent-private" rx="8"/>
+  <text x="710" y="925" class="node-title">game-engine</text>
+  <text x="710" y="944" class="node-sub">Cloud Run · container :8080 HTTP</text>
+  <text x="710" y="961" class="node-sub">ingress: INTERNAL_ONLY</text>
+  <text x="710" y="978" class="node-sub">invoker: compute SA only</text>
+  <text x="710" y="995" class="node-sub">(no allUsers, no public path)</text>
+  <text x="710" y="1012" class="node-sub">structured JSON logs + OTel spans</text>
+
+  <line x1="630" y1="975" x2="688" y2="975" class="edge edge-private" marker-end="url(#arrPrivate)"/>
+  <rect x="632" y="930" width="290" height="42" class="label-bg"/>
+  <text x="636" y="944" class="edge-label edge-label-strong">HTTPS :443 → *.run.app (VPC egress)</text>
+  <text x="636" y="960" class="edge-label">Bearer OIDC ID token · X-Trace-Id · traceparent</text>
+
+  <rect x="300" y="1090" width="300" height="96" class="node-rect accent-private" rx="8"/>
+  <text x="320" y="1114" class="node-title">Cloud SQL — rps-postgres</text>
+  <text x="320" y="1133" class="node-sub">Postgres 16 · db-f1-micro</text>
+  <text x="320" y="1150" class="node-sub">10.16.80.3 : 5432</text>
+  <text x="320" y="1167" class="node-sub">Connector (mTLS) · IAM auth, no password</text>
+
+  <rect x="660" y="1090" width="300" height="96" class="node-rect accent-private" rx="8"/>
+  <text x="680" y="1114" class="node-title">Redis — rps-leaderboard-cache</text>
+  <text x="680" y="1133" class="node-sub">BASIC · 1GB</text>
+  <text x="680" y="1150" class="node-sub">10.120.115.11 : 6379</text>
+  <text x="680" y="1167" class="node-sub">Redis protocol · no AUTH (net-isolated)</text>
+
+  <line x1="440" y1="1050" x2="440" y2="1088" class="edge edge-private" marker-end="url(#arrPrivate)"/>
+  <line x1="810" y1="1050" x2="810" y2="1088" class="edge edge-private" marker-end="url(#arrPrivate)"/>
+
+  <rect x="300" y="1220" width="330" height="52" class="node-rect" rx="8"/>
+  <text x="318" y="1242" class="node-sub" style="font-weight:700">rps-router + rps-nat</text>
+  <text x="318" y="1259" class="node-sub">AUTO_ONLY IPs · all subnets</text>
+
+  <line x1="440" y1="1052" x2="440" y2="1218" class="edge edge-public" marker-end="url(#arrPublic)"/>
+  <rect x="448" y="1120" width="210" height="18" class="label-bg"/>
+  <text x="452" y="1133" class="edge-label">ALL_TRAFFIC egress (public APIs)</text>
+
+  <line x1="630" y1="1246" x2="688" y2="1246" class="edge edge-public" marker-end="url(#arrPublic)"/>
+
+  <rect x="690" y="1220" width="280" height="52" class="node-rect accent-public" rx="8"/>
+  <text x="708" y="1242" class="node-sub" style="font-weight:700">Public Google APIs</text>
+  <text x="708" y="1259" class="node-sub">:443 HTTPS (e.g. Cloud SQL Admin)</text>
+
+  <text x="278" y="1318" class="note-text">Service Networking peering: apigee-psa-range 10.120.0.0/16 (Apigee + Redis) · data-psa-range 10.16.80.0/20 (Cloud SQL)</text>
+
+  <!-- ============ Right column: Identity verification + Observability ============ -->
+  <path d="M 1160 100 L 1160 900 L 1022 940" class="edge edge-control" marker-end="url(#arrControl)" fill="none"/>
+  <rect x="1170" y="480" width="130" height="36" class="label-bg"/>
+  <text x="1174" y="495" class="edge-label edge-label-strong">verify_id_token()</text>
+  <text x="1174" y="511" class="edge-label">HTTPS :443 → Google certs</text>
+
+  <rect x="1080" y="900" width="220" height="76" class="node-rect accent-control" rx="8"/>
+  <text x="1098" y="923" class="node-title" style="font-size:14px">Cloud Trace API</text>
+  <text x="1098" y="941" class="node-sub">OTel spans</text>
+  <text x="1098" y="957" class="node-sub">gRPC/HTTPS :443</text>
+
+  <rect x="1080" y="990" width="220" height="76" class="node-rect accent-control" rx="8"/>
+  <text x="1098" y="1013" class="node-title" style="font-size:14px">Cloud Logging</text>
+  <text x="1098" y="1031" class="node-sub">stdout → run agent</text>
+  <text x="1098" y="1047" class="node-sub">JSON, trace field</text>
+
+  <line x1="630" y1="945" x2="1078" y2="930" class="edge edge-control" marker-end="url(#arrControl)"/>
+  <line x1="630" y1="1000" x2="1078" y2="1015" class="edge edge-control" marker-end="url(#arrControl)"/>
+  <line x1="1020" y1="990" x2="1078" y2="960" class="edge edge-control" marker-end="url(#arrControl)"/>
+  <line x1="1020" y1="1030" x2="1078" y2="1030" class="edge edge-control" marker-end="url(#arrControl)"/>
+</svg>

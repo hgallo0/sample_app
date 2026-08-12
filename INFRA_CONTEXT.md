@@ -67,6 +67,7 @@ RESET ROLE;
 | `game-api` env vars | `PROJECT_ID`, `REGION`, `DB_IAM_USER`, `REDIS_HOST`, `GAME_ENGINE_URL` — all wired |
 | `game-api` VPC access | Direct VPC egress, `ALL_TRAFFIC` (not `PRIVATE_RANGES_ONLY`) — needed so calls to `game-engine`'s `*.run.app` URL route through the VPC and get recognized as internal Cloud-Run-to-Cloud-Run traffic by `game-engine`'s `INGRESS_TRAFFIC_INTERNAL_ONLY`; `PRIVATE_RANGES_ONLY` sends calls to public hostnames out the normal internet path instead, which gets silently rejected as external (404, no app-side logs). Requires the Cloud NAT above. |
 | `game-api` startup probe | `tcp_socket` port 8080, `failure_threshold = 3` (not the Cloud Run default of 1) — Direct VPC egress cold-start connection establishment can take "a minute or more" per Google's docs; the default single-attempt probe isn't enough headroom. |
+| Backend service `timeout_sec` | `game-api-backend` and `apigee-backend` both set to `120` (not GCP's 30s default) — same cold-start reasoning as the startup probe above, but the LB backend timeout is a separate setting that doesn't inherit the probe's headroom. Confirmed live: a cold-start request took 36s end-to-end, already past the 30s default, producing a 504 at the LB before `game-api` finished starting. Any new/replacement backend service fronting `game-api` (directly or via a hairpin) needs this set at creation time. |
 
 ## game-engine (Go, internal only)
 
