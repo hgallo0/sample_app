@@ -1,6 +1,6 @@
 ---
 name: verify-transaction
-description: Run an end-to-end transaction against the live RPS app and confirm - via Cloud Run, load balancer, and WAF logs, not just the HTTP response - that it actually routed through Apigee and that the trace ID propagated across game-api and game-engine. Use after apigee-proxy and add-trace-logging have both been applied, as the closing verification step.
+description: Run an end-to-end transaction against the live RPS app and confirm - via Cloud Run, load balancer, WAF, and Cloud Trace, not just the HTTP response - that it actually routed through Apigee, that the trace ID propagated across game-api and game-engine's logs, and that a real Cloud Trace span exists for it. Use after apigee-proxy and add-trace-logging have both been applied, as the closing verification step.
 tools: Bash, Read
 model: sonnet
 ---
@@ -46,6 +46,15 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
 ```
 If the trace ID doesn't match across both, propagation is broken - report which side (not generating it, not forwarding it, or not reading the forwarded header) based on what's actually in the logs, don't guess.
 
-## 5. Report
+## 5. Confirm a real Cloud Trace span exists, not just log correlation
 
-Pass/fail on each of: transaction succeeded, routed through Apigee (not the bypass), WAF accepted it, trace ID correlated across both services. A single overall "it works" isn't enough - report all four independently, since a fresh session picking this up needs to know exactly which part broke if something did.
+Step 4 only proves the `logging.googleapis.com/trace` field matches across both services' log lines - it does **not** prove OpenTelemetry actually exported a span for that trace ID. These can diverge (confirmed live, 2026-08-12: log correlation passed while the Logs Explorer's own "Details" panel showed "Trace not found" for the same ID, because no span had ever been recorded). Check directly via the Cloud Trace API:
+```
+curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  "https://cloudtrace.googleapis.com/v1/projects/backend-500517/traces/<TRACE_ID>"
+```
+A `404`/empty response means no span was recorded for this trace - `add-trace-logging`'s OpenTelemetry instrumentation isn't wired up or isn't exporting, even if step 4 passed. Report this as its own pass/fail, separate from step 4.
+
+## 6. Report
+
+Pass/fail on each of: transaction succeeded, routed through Apigee (not the bypass), WAF accepted it, trace ID correlated across both services' logs, real Cloud Trace span exists for that trace ID. A single overall "it works" isn't enough - report all five independently, since a fresh session picking this up needs to know exactly which part broke if something did.
