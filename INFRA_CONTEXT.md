@@ -158,4 +158,4 @@ out-of-band via `gcloud secrets versions add`, never a
 **Still deferred to the live session:**
 - Frontend (React + Firebase Google Sign-In UI) — backend/auth is ready for it, nothing built client-side yet
 - Apigee proxy bundle wiring Apigee → `game-api` — see the routing spec above, this is execution not discovery
-- Structured logging with a trace ID per transaction, across `game-api`/`game-engine` — not started at all yet
+- Structured logging + real OpenTelemetry spans (trace ID per transaction, correlated across `game-api`/`game-engine` and queryable in the Cloud Trace waterfall) — not started at all yet. Note: the prerequisite for the OTel exporters to actually work, `cloudtrace.googleapis.com` enabled + `roles/cloudtrace.agent` on the shared runtime compute SA, is already permanent committed infra (`main.tf`'s `services` list + `google_project_iam_member.compute_sa_cloudtrace_agent`) — don't re-discover or re-provision this, just confirm it's present.
