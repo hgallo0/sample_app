@@ -21,7 +21,8 @@
       "Bash(gcloud apigee apis list*)",
       "Bash(gcloud config get-value *)",
       "Bash(gcloud auth print-access-token*)",
-      "Bash(gcloud auth application-default print-access-token*)"
+      "Bash(gcloud auth application-default print-access-token*)",
+      "Bash(python3 -c *)"
     ]
   }
 }
