@@ -4,7 +4,9 @@ Mock build for the Savvy Senior Engineer AI/technical exercise interview round, 
 
 ## Architecture
 
-![Architecture diagram](architecture.png)
+![Infrastructure topology: browser through the load balancer, WAF, Apigee hairpin, Cloud Run services, and the data layer, with protocol and port on every hop](architecture.svg)
+
+Colors mark the trust boundary each hop crosses: <span style="color:#B8622E">public internet</span>, <span style="color:#1B7A6C">VPC-private</span>, <span style="color:#5B57A8">control-plane / telemetry</span> (dashed — runs alongside the request, not on it). Full hop-by-hop protocol/port/auth reference lives in `INFRA_CONTEXT.md`.
 
 ## User journey
 
@@ -91,3 +93,7 @@ Summary at the end of the run:
 | Routed through Apigee (not bypass) | PASS |
 | WAF accepted | PASS |
 | Trace ID correlated (game-api ↔ game-engine) | PASS |
+
+Example Cloud Trace waterfall for a single transaction, showing the span nesting from `POST /api/move` through the `game-engine` call — proof the OpenTelemetry wiring works, not a permanent trace (this run's trace ID/timestamp won't exist after the next `/teardown`):
+
+![Cloud Trace waterfall for a single POST /api/move transaction, showing POST /api/move nesting a POST game-engine /play span which nests a /play span in game-engine, 257.977ms total across 5 spans](trace_example.png)
