@@ -1,3 +1,8 @@
 PLAN.md
 __pycache__/
 *.pyc
+
+# Apigee proxy bundle source - written for live-demo inspection (apigee-proxy
+# agent), not committed. Same live-build convention as the trace-logging app
+# code: real for the demo, not part of shipped history.
+app/apigee/bundles/

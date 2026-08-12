@@ -80,3 +80,14 @@ OpenTofu-managed, split into `main.tf` (root resources), `providers.tf` (backend
 - DNS
 - Global load balancer
 - Google Identity Platform (Firebase-backed auth)
+
+## Verification summary
+
+Summary at the end of the run:
+
+| Check | Result |
+|---|---|
+| Transaction succeeded | PASS |
+| Routed through Apigee (not bypass) | PASS |
+| WAF accepted | PASS |
+| Trace ID correlated (game-api ↔ game-engine) | PASS |
