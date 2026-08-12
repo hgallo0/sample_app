@@ -11,6 +11,7 @@ Mock build for the Savvy Senior Engineer AI/technical exercise interview round.
 - Reusable/repeated infra goes in `infra/modules/<module-name>/`, each module following the same `main.tf` / `vars.tf` / `output.tf` split internally.
 - Use OpenTofu (`tofu`), not Terraform CLI.
 - Do not create GCP resources imperatively with `gcloud` (or the console). Everything provisioned - including things that feel "fast enough to just create ad-hoc," like an Artifact Registry repo - must be defined in OpenTofu and created via `tofu apply`. `gcloud` is only for read-only checks (`describe`/`list`/`get-iam-policy`) and for the specific out-of-band secret-value operations called out below, never for creating/modifying infrastructure.
+- Never run two `tofu plan`/`tofu apply` commands concurrently against this repo's state (e.g. piping one to `tail`/backgrounding it and starting another before it's confirmed to have exited cleanly). State is GCS-backed and lock-protected; an interrupted or overlapping command can leave a stale lock behind, which then blocks every subsequent `tofu` command with `Error acquiring the state lock` until someone runs `tofu force-unlock` - confirmed live (2026-08-12), cost several minutes mid-rehearsal. Let one `tofu` command fully finish (check its actual exit, don't just move on) before starting another. If you do hit a stale lock, confirm via `ps`/agent status that no `tofu` process is actually still running before force-unlocking - never force-unlock while a legitimate apply might still be in flight.
 
 ## Security conventions
 
