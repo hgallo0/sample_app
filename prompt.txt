@@ -3,7 +3,8 @@ You are a software engineer with knowledge of OpenTofu and GCP for infrastructur
 Use INFRA_CONTEXT.md as the reference for how the infrastructure is laid out — it includes the routing spec for this exact task (PSC NEG backend, the internal hairpin path rule, the envgroup hostname fix, and the policy scope). Read it first; the routing decisions are already made, this is execution, not discovery.
 
 You will need a token for testing purposes, use this token which will expire in 1 hour:
-[place holder for token which you can get from   http://localhost:8743/sso-test.html]
+[eyJhbGciOiJSUzI1NiIsImtpZCI6IjI3YzQ1NTQ4NTU1NTYxOTYwZjQ5MWQ1MDYzOWU1NTY1N2IyMTJhYmMiLCJ0eXAiOiJKV1QifQ.eyJuYW1lIjoiSGVucnkgR2FsbG8iLCJwaWN0dXJlIjoiaHR0cHM6Ly9saDMuZ29vZ2xldXNlcmNvbnRlbnQuY29tL2EvQUNnOG9jS3ZXd0stU21faEd0OEtWSUd3RUlaS214ZmNBOGhwTHZiTThOemRHSVdDanRvZ0JrSldfQT1zOTYtYyIsImlzcyI6Imh0dHBzOi8vc2VjdXJldG9rZW4uZ29vZ2xlLmNvbS9iYWNrZW5kLTUwMDUxNyIsImF1ZCI6ImJhY2tlbmQtNTAwNTE3IiwiYXV0aF90aW1lIjoxNzg2NTY3NDA0LCJ1c2VyX2lkIjoidURRbEJxbENzQ2FQY24xc1BLM2NKN3VhTU55MSIsInN1YiI6InVEUWxCcWxDc0NhUGNuMXNQSzNjSjd1YU1OeTEiLCJpYXQiOjE3ODY1Njc0MDQsImV4cCI6MTc4NjU3MTAwNCwiZW1haWwiOiJnYWxsb2hlbnJ5QGdtYWlsLmNvbSIsImVtYWlsX3ZlcmlmaWVkIjp0cnVlLCJmaXJlYmFzZSI6eyJpZGVudGl0aWVzIjp7Imdvb2dsZS5jb20iOlsiMTAzMDczMTM4MDM0OTI0NjM0MTA1Il0sImVtYWlsIjpbImdhbGxvaGVucnlAZ21haWwuY29tIl19LCJzaWduX2luX3Byb3ZpZGVyIjoiZ29vZ2xlLmNvbSJ9fQ.RFQPviS8vpqykop-Ecx6ApQKi0Fqymx1XhRG_5qAuLoEp0z1nSKL-TwjPi7YfZdBI3HeHqlBpQAlvv90rYtIxqJyHOSgh9rIu33dHc5nPXDXaNaReW6H_4t1tdFm-tzVLshA1EaT0zNFZiXUuIBsnCuIc7ZFMUV4DKdkaD8C89QD3_qDOB6h4mItERoMMq9PhbDlC5-NacPr0jGjz67GZw7bibYniV1a45AwYrzeaIbf9cQvBCo4-ZlJ2sYdfwoMNW0rAO1p3SkkQxktZwsBIUe85amj89p7DRVpVS6RCM65HWgnz-5btSa1ndZjEpzoBCX78-qBxc0NuguJXGXEuw]
+from   http://localhost:8743/sso-test.html
 
 Frontend is prebuilt substrate now (bucket + static page + url_map wiring), not a live-build step - it's already live at "/" and doesn't need touching. Use these agents, in this order, rather than doing the work inline:
 
@@ -15,3 +16,4 @@ Frontend is prebuilt substrate now (bucket + static page + url_map wiring), not 
 Definition of done: all four checks in step 4 pass. The RPS application is reachable from https://rps.cloudwithgallo.com with traffic actually routed through the Apigee proxy, not the old direct-to-game-api path — a passing curl response alone doesn't count if `verify-transaction`'s load balancer log check still shows the old backend service.
 
 Don't ask for confirmation on routine reads/plans (`tofu plan`, `gcloud describe/list`, etc. - these are already allowlisted, see `.claude/settings.json`). `deploy-cloud-run` and `apigee-proxy` will each still stop and show their `tofu apply` plan before applying, by design - that's not a pause to route around, it's the trust boundary for real infra changes; get a direct go-ahead at each stop rather than trying to pre-authorize it here.
+Do not update the tests I will do that later 
