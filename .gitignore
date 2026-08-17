@@ -2,6 +2,7 @@ PLAN.md
 __pycache__/
 *.pyc
 grafanatoken
+notes.txt
 
 # prospect-tracker (Node/Vite) build artifacts and local secrets
 app/prospect-tracker/**/node_modules/
