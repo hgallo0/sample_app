@@ -17,6 +17,10 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.6"
     }
+    grafana = {
+      source  = "grafana/grafana"
+      version = "~> 3.0"
+    }
   }
 }
 
@@ -33,4 +37,12 @@ provider "google-beta" {
   region                = var.region
   user_project_override = true
   billing_project       = var.project_id
+}
+
+# Auth token comes from the GRAFANA_AUTH env var at apply time - never
+# hardcoded here, never in state as a resource attribute (it's provider
+# config, not a resource field), same secrets-out-of-Tofu spirit as
+# everything else in this repo.
+provider "grafana" {
+  url = "https://shortreindeer1185.grafana.net"
 }

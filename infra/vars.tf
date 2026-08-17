@@ -21,3 +21,9 @@ variable "lb_domain" {
   type        = string
   default     = "rps.cloudwithgallo.com"
 }
+
+variable "wealth_domain" {
+  description = "Second public hostname on the same load balancer, dedicated to prospect-tracker - a clean root domain (no /advisor path prefix) for the financial-services demo"
+  type        = string
+  default     = "wealth.cloudwithgallo.com"
+}
