@@ -31,6 +31,15 @@ output "rps_zone_name_servers" {
   value       = google_dns_managed_zone.rps.name_servers
 }
 
+output "wealth_zone_name_servers" {
+  description = "Add these as an NS record for 'wealth' at the GoDaddy registrar to delegate the subdomain"
+  value       = google_dns_managed_zone.wealth.name_servers
+}
+
+output "wealth_domain" {
+  value = var.wealth_domain
+}
+
 output "artifact_registry_repo" {
   description = "Artifact Registry repo path for game-api/game-engine images"
   value       = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.rps_images.repository_id}"
@@ -49,6 +58,24 @@ output "db_iam_user" {
 output "frontend_bucket_name" {
   description = "GCS bucket backing the static frontend (backend-bucket origin for the GLB's default_service)"
   value       = google_storage_bucket.frontend.name
+}
+
+output "prospect_api_url" {
+  description = "Raw prospect-api Cloud Run URL - informational only, real traffic goes through wealth.cloudwithgallo.com/api/ (LB-only ingress blocks this URL directly, same as game-api)"
+  value       = google_cloud_run_v2_service.prospect_api.uri
+}
+
+output "prospect_web_url" {
+  description = "Raw prospect-web Cloud Run URL - informational only, real traffic goes through wealth.cloudwithgallo.com (LB-only ingress blocks this URL directly, same as game-api)"
+  value       = google_cloud_run_v2_service.prospect_web.uri
+}
+
+output "grafana_app_health_dashboard_url" {
+  value = module.grafana_dashboards.app_health_url
+}
+
+output "grafana_business_funnel_dashboard_url" {
+  value = module.grafana_dashboards.business_funnel_url
 }
 
 output "firebase_web_app_config" {

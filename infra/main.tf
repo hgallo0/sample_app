@@ -363,6 +363,225 @@ module "security" {
   ]
 }
 
+# --- prospect-tracker (financial-advisor CRM demo app) ---------------------
+# Shares this project's existing Postgres instance, VPC/NAT, WAF policy, and
+# LB/cert/domain with the RPS app - see the "Share existing rps-postgres
+# instance" / "Path-based on rps.cloudwithgallo.com" decisions in the plan
+# this was built from. Same IAM-auth pattern as game-api: no passwords.
+
+resource "google_sql_database" "prospects" {
+  project    = var.project_id
+  name       = "prospects"
+  instance   = module.base_infra.postgres_instance_name
+  depends_on = [module.base_infra]
+}
+# NOTE (manual, non-Tofu step): Postgres privileges are per-database, so the
+# shared compute SA's existing IAM DB user (created once for game-api/`rps`
+# in modules/base-infra/main.tf) still needs a one-time
+# `GRANT ALL ON SCHEMA public TO "<db_iam_user>"` on THIS `prospects`
+# database via Cloud SQL Studio before prospect-api can read/write - same
+# manual step INFRA_CONTEXT.md documents for game_api's schema, not
+# something a Tofu resource type covers.
+
+resource "google_secret_manager_secret" "grafana_otlp_headers" {
+  project   = var.project_id
+  secret_id = "grafana-otlp-headers"
+  replication {
+    auto {}
+  }
+  depends_on = [module.base_infra]
+}
+
+resource "google_secret_manager_secret_iam_member" "grafana_otlp_headers_accessor" {
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.grafana_otlp_headers.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${data.google_project.current.number}-compute@developer.gserviceaccount.com"
+}
+
+resource "google_cloud_run_v2_service" "prospect_api" {
+  project  = var.project_id
+  name     = "prospect-api"
+  location = var.region
+  # Rehearsal env, not production - see the same note on game-api above.
+  deletion_protection = false
+  # Load balancer only, same restriction/reasoning as game-api below.
+  ingress = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
+
+  template {
+    labels = {
+      app-version = "v0-1-1"
+    }
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 1
+    }
+    # Same ALL_TRAFFIC reasoning as game-api: needs the VPC path to
+    # Postgres's private IP, and ALL_TRAFFIC (not PRIVATE_RANGES_ONLY) still
+    # leaves a route to the public internet via rps-nat for the Cloud SQL
+    # connector's IAM token fetch and the Grafana Cloud OTLP export.
+    vpc_access {
+      network_interfaces {
+        network    = data.google_compute_network.default.name
+        subnetwork = data.google_compute_subnetwork.default.name
+      }
+      egress = "ALL_TRAFFIC"
+    }
+    containers {
+      image = "us-central1-docker.pkg.dev/${var.project_id}/rps-images/prospect-api:v0.1.1"
+      env {
+        name  = "PROJECT_ID"
+        value = var.project_id
+      }
+      env {
+        name  = "REGION"
+        value = var.region
+      }
+      env {
+        name  = "INSTANCE_NAME"
+        value = module.base_infra.postgres_instance_name
+      }
+      env {
+        name  = "DB_NAME"
+        value = google_sql_database.prospects.name
+      }
+      env {
+        name  = "DB_IAM_USER"
+        value = "${data.google_project.current.number}-compute@developer"
+      }
+      env {
+        name  = "OTEL_EXPORTER_OTLP_ENDPOINT"
+        value = "https://otlp-gateway-prod-us-east-3.grafana.net/otlp"
+      }
+      env {
+        name = "OTEL_EXPORTER_OTLP_HEADERS"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.grafana_otlp_headers.secret_id
+            version = "latest"
+          }
+        }
+      }
+      # Same generous startup window as game-api - Cloud SQL IAM auth and the
+      # OTel OTLP exporter both make outbound calls through the same
+      # ALL_TRAFFIC/NAT path at startup.
+      startup_probe {
+        tcp_socket {
+          port = 8080
+        }
+        period_seconds    = 240
+        timeout_seconds   = 10
+        failure_threshold = 3
+      }
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [scaling]
+  }
+}
+
+resource "google_cloud_run_v2_service_iam_member" "prospect_api_public" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.prospect_api.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+# Static client (Vite build served by nginx) - no VPC egress needed, it makes
+# no outbound calls of its own.
+resource "google_cloud_run_v2_service" "prospect_web" {
+  project             = var.project_id
+  name                = "prospect-web"
+  location            = var.region
+  deletion_protection = false
+  ingress             = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
+
+  template {
+    labels = {
+      app-version = "v0-1-1"
+    }
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 1
+    }
+    containers {
+      image = "us-central1-docker.pkg.dev/${var.project_id}/rps-images/prospect-web:v0.1.1"
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [scaling]
+  }
+}
+
+resource "google_cloud_run_v2_service_iam_member" "prospect_web_public" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.prospect_web.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+resource "google_compute_region_network_endpoint_group" "prospect_api_neg" {
+  project               = var.project_id
+  name                  = "prospect-api-neg"
+  region                = var.region
+  network_endpoint_type = "SERVERLESS"
+  cloud_run {
+    service = google_cloud_run_v2_service.prospect_api.name
+  }
+}
+
+resource "google_compute_region_network_endpoint_group" "prospect_web_neg" {
+  project               = var.project_id
+  name                  = "prospect-web-neg"
+  region                = var.region
+  network_endpoint_type = "SERVERLESS"
+  cloud_run {
+    service = google_cloud_run_v2_service.prospect_web.name
+  }
+}
+
+# Same WAF policy as game-api - one Cloud Armor policy covers every backend
+# on this GLB, not a separate policy per app.
+resource "google_compute_backend_service" "prospect_api" {
+  project               = var.project_id
+  name                  = "prospect-api-backend"
+  protocol              = "HTTPS"
+  load_balancing_scheme = "EXTERNAL_MANAGED"
+  security_policy       = module.security.id
+
+  log_config {
+    enable = true
+  }
+
+  backend {
+    group = google_compute_region_network_endpoint_group.prospect_api_neg.id
+  }
+}
+
+resource "google_compute_backend_service" "prospect_web" {
+  project               = var.project_id
+  name                  = "prospect-web-backend"
+  protocol              = "HTTPS"
+  load_balancing_scheme = "EXTERNAL_MANAGED"
+  security_policy       = module.security.id
+
+  log_config {
+    enable = true
+  }
+
+  backend {
+    group = google_compute_region_network_endpoint_group.prospect_web_neg.id
+  }
+}
+module "grafana_dashboards" {
+  source = "./modules/grafana-dashboards"
+}
+# --- end prospect-tracker ----------------------------------------------------
+
 resource "google_compute_backend_service" "game_api" {
   project               = var.project_id
   name                  = "game-api-backend"
@@ -480,6 +699,27 @@ resource "google_compute_url_map" "game_api" {
       }
     }
   }
+
+  # prospect-tracker gets its own clean domain rather than living under a
+  # path prefix here - same GLB/IP/cert (extra SAN below), separate host_rule
+  # so it can use natural root/api paths with no rewrite needed.
+  host_rule {
+    hosts        = [var.wealth_domain]
+    path_matcher = "wealth-routing"
+  }
+
+  path_matcher {
+    name            = "wealth-routing"
+    default_service = google_compute_backend_service.prospect_web.id
+
+    route_rules {
+      priority = 1
+      service  = google_compute_backend_service.prospect_api.id
+      match_rules {
+        prefix_match = "/api/"
+      }
+    }
+  }
 }
 
 resource "google_compute_managed_ssl_certificate" "game_api" {
@@ -490,11 +730,29 @@ resource "google_compute_managed_ssl_certificate" "game_api" {
   }
 }
 
+# Separate cert resource rather than adding wealth_domain to the one above -
+# `domains` forces full replacement of a managed cert on change, which would
+# destroy the already-active, already-serving rps.cloudwithgallo.com cert and
+# leave both domains without valid HTTPS until the new multi-domain cert
+# re-validates (which can't complete until wealth's DNS delegation is live).
+# An independent cert here means rps.cloudwithgallo.com is never touched,
+# regardless of how long wealth.cloudwithgallo.com's validation takes.
+resource "google_compute_managed_ssl_certificate" "wealth" {
+  project = var.project_id
+  name    = "wealth-cert"
+  managed {
+    domains = [var.wealth_domain]
+  }
+}
+
 resource "google_compute_target_https_proxy" "game_api" {
-  project          = var.project_id
-  name             = "game-api-https-proxy"
-  url_map          = google_compute_url_map.game_api.id
-  ssl_certificates = [google_compute_managed_ssl_certificate.game_api.id]
+  project = var.project_id
+  name    = "game-api-https-proxy"
+  url_map = google_compute_url_map.game_api.id
+  ssl_certificates = [
+    google_compute_managed_ssl_certificate.game_api.id,
+    google_compute_managed_ssl_certificate.wealth.id,
+  ]
 }
 
 resource "google_compute_global_address" "lb_ip" {
@@ -528,6 +786,27 @@ resource "google_dns_record_set" "rps_a" {
   project      = var.project_id
   name         = google_dns_managed_zone.rps.dns_name
   managed_zone = google_dns_managed_zone.rps.name
+  type         = "A"
+  ttl          = 300
+  rrdatas      = [google_compute_global_address.lb_ip.address]
+}
+
+# Second delegated subdomain zone, same pattern as rps-zone above - GoDaddy
+# needs a fresh NS delegation for wealth.cloudwithgallo.com specifically,
+# separate from rps.cloudwithgallo.com's existing one.
+resource "google_dns_managed_zone" "wealth" {
+  project     = var.project_id
+  name        = "wealth-zone"
+  dns_name    = "${var.wealth_domain}."
+  description = "Delegated subdomain zone for the prospect-tracker load balancer hostname"
+
+  depends_on = [module.base_infra]
+}
+
+resource "google_dns_record_set" "wealth_a" {
+  project      = var.project_id
+  name         = google_dns_managed_zone.wealth.dns_name
+  managed_zone = google_dns_managed_zone.wealth.name
   type         = "A"
   ttl          = 300
   rrdatas      = [google_compute_global_address.lb_ip.address]

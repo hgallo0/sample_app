@@ -1,6 +1,14 @@
 PLAN.md
 __pycache__/
 *.pyc
+grafanatoken
+notes.txt
+
+# prospect-tracker (Node/Vite) build artifacts and local secrets
+app/prospect-tracker/**/node_modules/
+app/prospect-tracker/server/.env
+app/prospect-tracker/server/dist/
+app/prospect-tracker/client/dist/
 
 # Apigee proxy bundle source - written for live-demo inspection (apigee-proxy
 # agent), not committed. Same live-build convention as the trace-logging app
