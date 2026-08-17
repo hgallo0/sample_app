@@ -500,14 +500,14 @@ resource "google_cloud_run_v2_service" "prospect_web" {
 
   template {
     labels = {
-      app-version = "v0-1-0"
+      app-version = "v0-1-1"
     }
     scaling {
       min_instance_count = 0
       max_instance_count = 1
     }
     containers {
-      image = "us-central1-docker.pkg.dev/${var.project_id}/rps-images/prospect-web:v0.1.0"
+      image = "us-central1-docker.pkg.dev/${var.project_id}/rps-images/prospect-web:v0.1.1"
     }
   }
 
@@ -726,15 +726,33 @@ resource "google_compute_managed_ssl_certificate" "game_api" {
   project = var.project_id
   name    = "game-api-cert"
   managed {
-    domains = [var.lb_domain, var.wealth_domain]
+    domains = [var.lb_domain]
+  }
+}
+
+# Separate cert resource rather than adding wealth_domain to the one above -
+# `domains` forces full replacement of a managed cert on change, which would
+# destroy the already-active, already-serving rps.cloudwithgallo.com cert and
+# leave both domains without valid HTTPS until the new multi-domain cert
+# re-validates (which can't complete until wealth's DNS delegation is live).
+# An independent cert here means rps.cloudwithgallo.com is never touched,
+# regardless of how long wealth.cloudwithgallo.com's validation takes.
+resource "google_compute_managed_ssl_certificate" "wealth" {
+  project = var.project_id
+  name    = "wealth-cert"
+  managed {
+    domains = [var.wealth_domain]
   }
 }
 
 resource "google_compute_target_https_proxy" "game_api" {
-  project          = var.project_id
-  name             = "game-api-https-proxy"
-  url_map          = google_compute_url_map.game_api.id
-  ssl_certificates = [google_compute_managed_ssl_certificate.game_api.id]
+  project = var.project_id
+  name    = "game-api-https-proxy"
+  url_map = google_compute_url_map.game_api.id
+  ssl_certificates = [
+    google_compute_managed_ssl_certificate.game_api.id,
+    google_compute_managed_ssl_certificate.wealth.id,
+  ]
 }
 
 resource "google_compute_global_address" "lb_ip" {
