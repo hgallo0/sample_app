@@ -28,7 +28,20 @@ async function createPool(): Promise<pg.Pool> {
     user: DB_IAM_USER,
     database: DB_NAME,
     max: 5,
+    // Every new physical connection goes through the Cloud SQL connector's
+    // full IAM-token-mint + mTLS handshake, which traced at 4-22s in
+    // practice - not the few-ms a normal reconnect costs. pg's default
+    // 10s idle timeout was tearing connections down between ordinary gaps
+    // in traffic and forcing that cost on whatever request came next.
+    // Cloud Run kills the whole container on scale-to-zero anyway, so
+    // nothing leaks by never proactively closing idle connections here.
+    idleTimeoutMillis: 0,
   });
 }
 
 export const pool = await createPool();
+
+// Eagerly establish at least one connection during startup (still inside
+// the generous startup_probe window) rather than deferring that multi-
+// second cost to whichever user request happens to arrive first.
+await pool.query("SELECT 1");

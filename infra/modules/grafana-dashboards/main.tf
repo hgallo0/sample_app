@@ -27,6 +27,31 @@ resource "grafana_folder" "prospect_tracker" {
   title = var.folder_title
 }
 
+# ML-based dynamic bounds instead of a static threshold - request rate has
+# real daily/weekly seasonality that a fixed number can't account for
+# (either too tight and fires on normal traffic shape, or too loose and
+# misses a real anomaly during a quiet period). Traffic is the golden
+# signal picked here specifically because it's the one with the clearest
+# seasonal pattern to learn, unlike error rate (mostly zero) or latency
+# (already covered by the write-correctness/latency SLOs' static
+# thresholds, which suit a binary pass/fail better than a learned band).
+#
+# Note: training_window defaults to 90 days: this job will start producing
+# forecasts almost immediately, but with only hours of real history behind
+# it the bounds will be rough until it's had a few days to actually learn
+# this service's traffic shape.
+resource "grafana_machine_learning_job" "prospect_api_traffic_forecast" {
+  name            = "prospect-api-traffic-forecast"
+  metric          = "prospect_api_traffic_forecast"
+  description     = "Forecasted request-rate bounds for prospect-api - dynamic thresholds instead of a static one, since traffic has real daily/weekly seasonality."
+  datasource_type = "prometheus"
+  datasource_uid  = local.prometheus_uid
+
+  query_params = {
+    expr = "sum(rate(http_server_duration_milliseconds_count{service_name=\"prospect-tracker-api\"}[5m]))"
+  }
+}
+
 resource "grafana_dashboard" "app_health" {
   folder = grafana_folder.prospect_tracker.uid
   config_json = templatefile("${path.module}/dashboards/app-health.json.tpl", {

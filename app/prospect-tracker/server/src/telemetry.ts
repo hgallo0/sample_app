@@ -2,6 +2,7 @@
 // registered before express/pg are ever imported by the app itself - required
 // for auto-instrumentation to work under ESM (see @opentelemetry/instrumentation
 // docs on --import vs. a plain top-of-file import).
+import { diag, DiagConsoleLogger, DiagLogLevel } from "@opentelemetry/api";
 import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
 import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
@@ -11,6 +12,11 @@ import { NodeSDK } from "@opentelemetry/sdk-node";
 import { BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
 import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
+
+// Temporary: OTel is silent by default, which is exactly why the missing
+// HTTP trace spans went undiagnosed via app logs alone. WARN surfaces
+// exporter/instrumentation problems without being as noisy as DEBUG.
+diag.setLogger(new DiagConsoleLogger(), DiagLogLevel.WARN);
 
 // OTEL_EXPORTER_OTLP_ENDPOINT / OTEL_EXPORTER_OTLP_HEADERS come from the
 // environment (endpoint is plain, headers carry the Grafana Cloud API key
