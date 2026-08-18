@@ -12,6 +12,7 @@ module "base_infra" {
     "identitytoolkit.googleapis.com",
     "cloudresourcemanager.googleapis.com",
     "cloudtrace.googleapis.com",
+    "cloudscheduler.googleapis.com",
   ]
 
   psa_apigee_range_name = "apigee-psa-range"
@@ -810,6 +811,37 @@ resource "google_dns_record_set" "wealth_a" {
   type         = "A"
   ttl          = 300
   rrdatas      = [google_compute_global_address.lb_ip.address]
+}
+
+# Synthetic check - hits the live app through the real LB/WAF path every
+# minute, the same route a real advisor's browser takes (not a direct
+# Cloud Run bypass). Chosen over Grafana Cloud Synthetic Monitoring because
+# SM's installation flow needs a credential type (a legacy "MetricsPublisher"
+# API key) this account doesn't cleanly expose - this delivers the same
+# outside-in check using infra already fully under Tofu control.
+#
+# Also doubles as keep-warm traffic: prospect-api scales to zero
+# (min_instance_count=0) between bursts, which was leaving real gaps in its
+# metrics rather than just low values - exactly what was blocking the ML
+# traffic-forecast job's "at least 100 datapoints" training requirement.
+resource "google_cloud_scheduler_job" "prospect_api_synthetic_check" {
+  project     = var.project_id
+  region      = var.region
+  name        = "prospect-api-synthetic-check"
+  description = "Synthetic health check - GET /api/health through the real LB/WAF path, once a minute"
+  schedule    = "* * * * *"
+  time_zone   = "Etc/UTC"
+
+  http_target {
+    http_method = "GET"
+    uri         = "https://${var.wealth_domain}/api/health"
+  }
+
+  retry_config {
+    retry_count = 1
+  }
+
+  depends_on = [module.base_infra]
 }
 
 # Identity Platform (the underlying service behind Firebase Auth) - config
