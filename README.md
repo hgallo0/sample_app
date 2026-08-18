@@ -1,6 +1,4 @@
-# savvy
-
-Mock build for the Savvy Senior Engineer AI/technical exercise interview round, scheduled for Thu Aug 13th.
+# sample_app
 
 ## Architecture
 
