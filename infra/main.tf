@@ -411,7 +411,7 @@ resource "google_cloud_run_v2_service" "prospect_api" {
 
   template {
     labels = {
-      app-version = "v0-1-3"
+      app-version = "v0-1-4"
     }
     scaling {
       min_instance_count = 0
@@ -429,7 +429,7 @@ resource "google_cloud_run_v2_service" "prospect_api" {
       egress = "ALL_TRAFFIC"
     }
     containers {
-      image = "us-central1-docker.pkg.dev/${var.project_id}/rps-images/prospect-api:v0.1.3"
+      image = "us-central1-docker.pkg.dev/${var.project_id}/rps-images/prospect-api:v0.1.4"
       env {
         name  = "PROJECT_ID"
         value = var.project_id
@@ -835,6 +835,11 @@ resource "google_cloud_scheduler_job" "prospect_api_synthetic_check" {
   http_target {
     http_method = "GET"
     uri         = "https://${var.wealth_domain}/api/health"
+    headers = {
+      # Lets the app count this as a distinct synthetic_check_total metric,
+      # separate from real advisor traffic hitting the same /api/health route.
+      "X-Synthetic-Check" = "true"
+    }
   }
 
   retry_config {

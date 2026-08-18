@@ -66,6 +66,35 @@
           "legendFormat": "{{http_status_code}}"
         }
       ]
+    },
+    {
+      "id": 5,
+      "title": "Synthetic check success rate (1h)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } },
+      "datasource": { "type": "prometheus", "uid": "${prometheus_uid}" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${prometheus_uid}" },
+          "expr": "sum(increase(synthetic_check_total{result=\"ok\"}[1h])) / sum(increase(synthetic_check_total[1h]))",
+          "legendFormat": "success rate"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Synthetic checks - outside-in, once a minute",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 16, "x": 8, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "${prometheus_uid}" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${prometheus_uid}" },
+          "expr": "sum by (result) (increase(synthetic_check_total[5m]))",
+          "legendFormat": "{{result}}"
+        }
+      ]
     }
   ]
 }

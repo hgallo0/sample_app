@@ -12,6 +12,15 @@ export const stageTransitionsTotal = meter.createCounter("prospect_stage_transit
   description: "Prospect stage changes, labeled by from/to stage.",
 });
 
+// Purpose-built rather than trying to tag the auto-instrumented HTTP
+// metric: this instrumentation version drops custom span attributes when
+// deriving http_server_duration_milliseconds's own label set, so a
+// dedicated counter is the reliable way to distinguish synthetic checks
+// (Cloud Scheduler) from real requests, rather than a fragile label.
+export const syntheticCheckTotal = meter.createCounter("synthetic_check_total", {
+  description: "Outside-in synthetic health checks (Cloud Scheduler), by result.",
+});
+
 // Observable gauge: queried on each metrics export rather than incremented
 // inline, so it always reflects the live count per stage - this is what
 // powers the funnel dashboard's "current pipeline" view.
