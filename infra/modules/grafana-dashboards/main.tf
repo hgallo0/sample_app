@@ -41,11 +41,11 @@ resource "grafana_folder" "prospect_tracker" {
 # it the bounds will be rough until it's had a few days to actually learn
 # this service's traffic shape.
 resource "grafana_machine_learning_job" "prospect_api_traffic_forecast" {
-  name           = "prospect-api-traffic-forecast"
-  metric         = "prospect_api_traffic_forecast"
-  description    = "Forecasted request-rate bounds for prospect-api - dynamic thresholds instead of a static one, since traffic has real daily/weekly seasonality."
+  name            = "prospect-api-traffic-forecast"
+  metric          = "prospect_api_traffic_forecast"
+  description     = "Forecasted request-rate bounds for prospect-api - dynamic thresholds instead of a static one, since traffic has real daily/weekly seasonality."
   datasource_type = "prometheus"
-  datasource_uid = local.prometheus_uid
+  datasource_uid  = local.prometheus_uid
 
   query_params = {
     expr = "sum(rate(http_server_duration_milliseconds_count{service_name=\"prospect-tracker-api\"}[5m]))"
