@@ -22,7 +22,9 @@
       "Bash(gcloud config get-value *)",
       "Bash(gcloud auth print-access-token*)",
       "Bash(gcloud auth application-default print-access-token*)",
-      "Bash(python3 -c *)"
+      "Bash(python3 -c *)",
+      "Bash(awk '{print length\\($0\\), substr\\($0,1,6\\)}' /Users/henry/Documents/repos/savvy/grafanatoken)",
+      "Bash(awk '{print length\\($0\\), substr\\($0,1,6\\)}' /Users/henry/Documents/repos/savvy/grafanatoken2)"
     ]
   }
 }

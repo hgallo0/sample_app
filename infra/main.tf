@@ -410,7 +410,7 @@ resource "google_cloud_run_v2_service" "prospect_api" {
 
   template {
     labels = {
-      app-version = "v0-1-1"
+      app-version = "v0-1-3"
     }
     scaling {
       min_instance_count = 0
@@ -428,7 +428,7 @@ resource "google_cloud_run_v2_service" "prospect_api" {
       egress = "ALL_TRAFFIC"
     }
     containers {
-      image = "us-central1-docker.pkg.dev/${var.project_id}/rps-images/prospect-api:v0.1.1"
+      image = "us-central1-docker.pkg.dev/${var.project_id}/rps-images/prospect-api:v0.1.3"
       env {
         name  = "PROJECT_ID"
         value = var.project_id
