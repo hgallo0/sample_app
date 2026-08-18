@@ -1,7 +1,5 @@
 # savvy
 
-Mock build for the Savvy Senior Engineer AI/technical exercise interview round, scheduled for Thu Aug 13th.
-
 ## Architecture
 
 ![Infrastructure topology: browser through the load balancer, WAF, Apigee hairpin, Cloud Run services, and the data layer, with protocol and port on every hop](architecture.svg)
