@@ -7,6 +7,7 @@ import express from "express";
 import cors from "cors";
 import { pool } from "./db/pool.js";
 import { logger } from "./logger.js";
+import { syntheticCheckTotal } from "./metrics.js";
 import { prospectsRouter } from "./routes/prospects.js";
 import { PROSPECT_STAGES } from "./stages.js";
 
@@ -14,12 +15,18 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.get("/api/health", async (_req, res) => {
+app.get("/api/health", async (req, res) => {
+  // Set by the Cloud Scheduler synthetic check (infra/main.tf) so its
+  // requests are countable as a distinct outside-in signal, separate from
+  // real advisor traffic hitting the same route.
+  const isSynthetic = req.get("x-synthetic-check") === "true";
   try {
     await pool.query("SELECT 1");
+    if (isSynthetic) syntheticCheckTotal.add(1, { result: "ok" });
     res.json({ ok: true });
   } catch (err: any) {
     logger.error("health check failed", { error: err?.message ?? String(err) });
+    if (isSynthetic) syntheticCheckTotal.add(1, { result: "error" });
     res.status(503).json({ ok: false, error: "Database unavailable." });
   }
 });
