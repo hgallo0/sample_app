@@ -1,4 +1,4 @@
-# savvy
+# sample_app
 
 ## Architecture
 
