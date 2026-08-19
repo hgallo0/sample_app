@@ -411,7 +411,7 @@ resource "google_cloud_run_v2_service" "prospect_api" {
 
   template {
     labels = {
-      app-version = "v0-1-4"
+      app-version = "v0-1-5"
     }
     scaling {
       min_instance_count = 0
@@ -429,7 +429,7 @@ resource "google_cloud_run_v2_service" "prospect_api" {
       egress = "ALL_TRAFFIC"
     }
     containers {
-      image = "us-central1-docker.pkg.dev/${var.project_id}/rps-images/prospect-api:v0.1.4"
+      image = "us-central1-docker.pkg.dev/${var.project_id}/rps-images/prospect-api:v0.1.5"
       env {
         name  = "PROJECT_ID"
         value = var.project_id
@@ -825,19 +825,23 @@ resource "google_dns_record_set" "wealth_a" {
 # metrics rather than just low values - exactly what was blocking the ML
 # traffic-forecast job's "at least 100 datapoints" training requirement.
 resource "google_cloud_scheduler_job" "prospect_api_synthetic_check" {
-  project     = var.project_id
-  region      = var.region
-  name        = "prospect-api-synthetic-check"
-  description = "Synthetic health check - GET /api/health through the real LB/WAF path, once a minute"
+  project = var.project_id
+  region  = var.region
+  name    = "prospect-api-synthetic-check"
+  # /api/prospects, not /api/health: health only runs SELECT 1, which never
+  # touches the prospects/advisors tables - it would not have caught the
+  # real permission-denied incident from this build. Hitting a real data
+  # endpoint makes this check actually exercise the dependency that broke.
+  description = "Synthetic check - GET /api/prospects through the real LB/WAF path, once a minute"
   schedule    = "* * * * *"
   time_zone   = "Etc/UTC"
 
   http_target {
     http_method = "GET"
-    uri         = "https://${var.wealth_domain}/api/health"
+    uri         = "https://${var.wealth_domain}/api/prospects"
     headers = {
       # Lets the app count this as a distinct synthetic_check_total metric,
-      # separate from real advisor traffic hitting the same /api/health route.
+      # separate from real advisor traffic hitting the same route.
       "X-Synthetic-Check" = "true"
     }
   }
