@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { pool } from "../db/pool.js";
 import { logger } from "../logger.js";
-import { prospectsCreatedTotal, stageTransitionsTotal } from "../metrics.js";
+import { prospectsCreatedTotal, stageTransitionsTotal, syntheticCheckTotal } from "../metrics.js";
 import { isProspectStage, STAGES_REQUIRING_PROPOSAL_FIELDS, VALID_SERVICE_FEES } from "../stages.js";
 import type { ProspectStage } from "../stages.js";
 
@@ -30,14 +30,28 @@ function validateProposalFields(
   return null;
 }
 
-prospectsRouter.get("/", async (_req, res) => {
-  const { rows } = await pool.query(
-    `SELECT id, advisor_id, first_name, last_name, email, phone, stage,
-            estimated_value, service_fee, notes, created_at, updated_at
-     FROM prospects
-     ORDER BY created_at DESC`
-  );
-  res.json(rows);
+prospectsRouter.get("/", async (req, res, next) => {
+  // Set by the Cloud Scheduler synthetic check (infra/main.tf) so its
+  // requests are countable as a distinct outside-in signal, separate from
+  // real advisor traffic hitting the same route. Targets this route rather
+  // than /api/health specifically because health's SELECT 1 never touches
+  // the prospects table - it wouldn't have caught this build's real
+  // permission-denied incident, and this check should actually exercise
+  // the dependency that broke.
+  const isSynthetic = req.get("x-synthetic-check") === "true";
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, advisor_id, first_name, last_name, email, phone, stage,
+              estimated_value, service_fee, notes, created_at, updated_at
+       FROM prospects
+       ORDER BY created_at DESC`
+    );
+    if (isSynthetic) syntheticCheckTotal.add(1, { result: "ok" });
+    res.json(rows);
+  } catch (err) {
+    if (isSynthetic) syntheticCheckTotal.add(1, { result: "error" });
+    next(err);
+  }
 });
 
 prospectsRouter.post("/", async (req, res) => {
