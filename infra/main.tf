@@ -508,7 +508,7 @@ resource "google_cloud_run_v2_service" "prospect_web" {
       max_instance_count = 1
     }
     containers {
-      image = "us-central1-docker.pkg.dev/${var.project_id}/rps-images/prospect-web:v0.1.1"
+      image = "us-central1-docker.pkg.dev/${var.project_id}/rps-images/prospect-web:v0.1.3"
     }
   }
 
